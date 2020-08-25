@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 from stable_baselines.common.vec_env import SubprocVecEnv
 from stable_baselines import HER
-from stable_baselines import DDPG
-from stable_baselines.ddpg.policies import MlpPolicy
+from stable_baselines import SAC
+from stable_baselines.sac.policies import MlpPolicy
 from stable_baselines.common import set_global_seeds
 from stable_baselines.common.callbacks import CheckpointCallback
 
@@ -12,6 +12,7 @@ from example_pushing_training_env import FlatObservationWrapper
 
 import argparse
 import os
+os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
 import gym
 import numpy as np
 
@@ -44,10 +45,9 @@ if __name__ == "__main__":
 
     set_global_seeds(0)
     num_of_active_envs = 1
-    policy_kwargs = dict(enable_popart=True,
-                         full_tensorboard_log=True)
+    policy_kwargs = dict(layer=[256, 256])
     #env = gym.make("real_robot_challenge_phase_1-v1")
-    env = FlatObservationWrapper(ExamplePushingTrainingEnv(frameskip=3, visualization=False))
+    env = FlatObservationWrapper(ExamplePushingTrainingEnv(frameskip=20, visualization=False))
 
     train_configs = {
         "gamma": 0.99,
@@ -63,10 +63,9 @@ if __name__ == "__main__":
     model = HER(
         MlpPolicy,
         env,
-        DDPG,
+        SAC,
         verbose=1,
-        tensorboard_log=model_path,
-        **policy_kwargs
+        tensorboard_log=model_path
     )
 
     ckpt_frequency = int(validate_every_timesteps / num_of_active_envs)
