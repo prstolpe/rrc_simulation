@@ -24,14 +24,55 @@ class FlatObservationWrapper(gym.ObservationWrapper):
             for name in self.observation_names
         ]
 
-        self.observation_space = gym.spaces.Box(
-            low=np.concatenate(low), high=np.concatenate(high)
+        #self.observation_space = gym.spaces.Box(
+         #   low=np.concatenate(low), high=np.concatenate(high)
+        #)
+
+        self.pure_observation_names = [
+            "robot_position",
+            "robot_velocity",
+            "robot_tip_positions"
+        ]
+
+        self.achieved_goal_names = [
+            "object_position",
+            "object_orientation"
+        ]
+
+        self.desired_goal_names = [
+            "goal_object_position"
+        ]
+
+        self.observation_names = [
+            "observation",
+            "achieved_goal",
+            "desired_goal"
+        ]
+
+        self.observation_space = gym.spaces.Dict(
+            {
+                "observation": gym.spaces.Box(low=np.concatenate([self.observation_space[name].low.flatten()
+                                               for name in self.pure_observation_names]),
+                                              high=np.concatenate([self.observation_space[name].high.flatten()
+                                                                  for name in self.pure_observation_names])),
+                "achieved_goal": gym.spaces.Box(low=np.concatenate([self.observation_space[name].low.flatten()
+                                                 for name in self.achieved_goal_names]),
+                                                high=np.concatenate([self.observation_space[name].high.flatten()
+                                                                    for name in self.achieved_goal_names])
+                                                ),
+                "desired_goal": gym.spaces.Box(low=np.concatenate([self.observation_space[name].low.flatten()
+                                                for name in self.desired_goal_names]),
+                                               high=np.concatenate([self.observation_space[name].high.flatten()
+                                                for name in self.desired_goal_names]))
+            }
         )
 
     def observation(self, obs):
-        observation = [obs[name].flatten() for name in self.observation_names]
-
-        observation = np.concatenate(observation)
+        observation = {
+            "observation": np.concatenate([obs[name].flatten() for name in self.pure_observation_names]),
+            "achieved_goal": np.concatenate([obs[name].flatten() for name in self.achieved_goal_names]),
+            "desired_goal": np.concatenate([obs[name].flatten() for name in self.desired_goal_names])
+        }
         return observation
 
 
@@ -114,6 +155,7 @@ class ExamplePushingTrainingEnv(gym.Env):
             }
         )
 
+        self.info = dict()
     def step(self, action):
         if self.platform is None:
             raise RuntimeError("Call `reset()` before starting to step.")
@@ -144,10 +186,10 @@ class ExamplePushingTrainingEnv(gym.Env):
             previous_observation = self._create_observation(t)
             observation = self._create_observation(t + 1)
 
-            reward += self._compute_reward(
-                previous_observation=previous_observation,
-                observation=observation,
-            )
+            reward += self.compute_reward(np.concatenate((observation["object_position"].flatten(),
+                                                          observation["object_orientation"].flatten())),
+                                        self.goal["position"].flatten(),
+                                        self.info)
 
         is_done = self.step_count == move_cube.episode_length
 
@@ -201,7 +243,7 @@ class ExamplePushingTrainingEnv(gym.Env):
                 orientation=goal_object_pose.orientation,
             )
 
-        self.info = dict()
+        self.info = {"difficulty": 1}
 
         self.step_count = 0
 
@@ -229,6 +271,12 @@ class ExamplePushingTrainingEnv(gym.Env):
             "goal_object_position": self.goal["position"],
         }
         return observation
+
+    def compute_reward(self, achieved_goal, desired_goal, info):
+        desired_goal_dims = len(desired_goal)
+
+
+        return -np.linalg.norm(achieved_goal[:desired_goal_dims] - desired_goal)
 
     @staticmethod
     def _compute_reward(previous_observation, observation):

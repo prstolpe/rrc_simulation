@@ -1,12 +1,14 @@
 #!/usr/bin/env python3
 from stable_baselines.common.vec_env import SubprocVecEnv
-from stable_baselines import PPO2
-from stable_baselines.common.policies import MlpPolicy
+from stable_baselines import HER
+from stable_baselines import DDPG
+from stable_baselines.ddpg.policies import MlpPolicy
 from stable_baselines.common import set_global_seeds
 from stable_baselines.common.callbacks import CheckpointCallback
 
 from example_pushing_training_env import ExamplePushingTrainingEnv
 from example_pushing_training_env import FlatObservationWrapper
+
 
 import argparse
 import os
@@ -38,12 +40,14 @@ if __name__ == "__main__":
     validate_every_timesteps = 2000000
     model_path = os.path.join(output_path, "training_checkpoints")
 
-    os.makedirs(model_path)
+    os.makedirs(model_path, exist_ok=True)
 
     set_global_seeds(0)
-    num_of_active_envs = 20
-    policy_kwargs = dict(layers=[256, 256])
-    env = get_multi_process_env(num_of_active_envs)
+    num_of_active_envs = 1
+    policy_kwargs = dict(enable_popart=True,
+                         full_tensorboard_log=True)
+    #env = gym.make("real_robot_challenge_phase_1-v1")
+    env = FlatObservationWrapper(ExamplePushingTrainingEnv(frameskip=3, visualization=False))
 
     train_configs = {
         "gamma": 0.99,
@@ -56,14 +60,13 @@ if __name__ == "__main__":
         "noptepochs": 4,
     }
 
-    model = PPO2(
+    model = HER(
         MlpPolicy,
         env,
-        _init_setup_model=True,
-        policy_kwargs=policy_kwargs,
-        **train_configs,
+        DDPG,
         verbose=1,
-        tensorboard_log=model_path
+        tensorboard_log=model_path,
+        **policy_kwargs
     )
 
     ckpt_frequency = int(validate_every_timesteps / num_of_active_envs)
