@@ -16,8 +16,9 @@ def build_ffn_models(env: gym.Env, shared: bool = False,
 
     # input preprocessing
     inputs_value = tf.keras.Input(shape=(state_dimensionality + n_actions,))
-    inputs_policy = tf.keras.Input(shape=(state_dimensionality,))
+    inputs_policy = tf.keras.Input(shape=state_dimensionality)
     # policy network
+
     latent = _build_encoding_sub_model(inputs_policy.shape[1:], None, layer_sizes=layer_sizes,
                                        name="policy_encoder")(inputs_policy)
     out_policy = tf.keras.layers.Dense(n_actions, kernel_initializer=tf.keras.initializers.Orthogonal(1.0),
