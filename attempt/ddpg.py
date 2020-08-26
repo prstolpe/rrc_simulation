@@ -1,6 +1,7 @@
 import numpy as np
 import tensorflow as tf
 import gym
+import ray
 
 from attempt.utilities.utils import env_extract_dims
 from attempt.models.models import build_ffn_models
@@ -35,8 +36,8 @@ class ReplayBuffer:
 
 class DDPG:
 
-    def __init__(self, env:gym.Env, buffer_size:int=500000, seed:int=5, update_every=1000,
-                 batch_size=64, gamma:int=0.99, tau:int=1e-2):
+    def __init__(self, env:gym.Env, buffer_size:int=int(1e5), seed:int=5, update_every=1000,
+                 batch_size=16, gamma:int=0.99, tau:int=0.99, start_steps:int=1000):
 
         # env
         self.obs_dim, self.act_dim = env_extract_dims(env)
@@ -50,51 +51,65 @@ class DDPG:
 
         # networks
         self.policy, self.value, self.policy_target, self.value_target = build_ffn_models(env)
-        self.policy_optimizer = tf.keras.optimizers.Adam(lr=1e-4)
-        self.value_optimizer = tf.keras.optimizers.Adam(lr=1e-3)
+        self.policy_target.set_weights(self.policy.get_weights())
+        self.value_target.set_weights(self.value.get_weights())
+        self.policy_optimizer = tf.keras.optimizers.Adam(learning_rate=1e-3)
+        self.value_optimizer = tf.keras.optimizers.Adam(learning_rate=1e-3)
 
-        # ddpg
+        # ddpg hyperparameters
         self.gamma = gamma
         self.tau = tau
-        self.g = 1
 
         self.seed = np.random.seed(seed)
         self.step_counter = 0
-        self.update_every = update_every
+        self.start_steps = start_steps
         self.batch_size = batch_size
+
+        # monitoring
         self.rewards = []
+        self.value_losses = []
+        self.policy_losses = []
 
-    def explore(self, s):
+    def get_action(self, s):
 
-        a = self.policy.predict(s.reshape(1, -1))[0]
+        a = self.policy(s.reshape(1, -1))[0]
         a += 0.1 * np.random.randn(self.act_dim)
-        return np.clip(a, -self.act_low, self.act_high)
+        return np.clip(a, self.act_low, self.act_high)
+
+    def _policy_loss(self, states):
+        next_policy_actions = self.act_high *   self.policy(states)
+        return - tf.reduce_mean(self.value(tf.concat((states, next_policy_actions), axis=-1)))
+
+    def _value_loss(self, states, actions, next_states, rewards, done):
+        Qvals = self.value(tf.concat((states, actions), axis=-1))
+        next_actions = self.policy_target(next_states)
+        next_Q = self.value_target(tf.concat((next_states, next_actions), axis=-1))
+
+        Qprime = rewards + self.gamma * (1 - done) * next_Q
+
+        return tf.reduce_mean(tf.square(Qvals - Qprime))
 
     def _learn_on_batch(self, batch):
-        states, next_states, actions, rewards, done = batch['obs1'], batch['obs2'], batch['acts'], batch['rews'], batch['done']
-        states_actions = tf.concat((states, actions), axis=-1)
-        # policy optimization
-        with tf.GradientTape() as tape2:
-            next_policy_actions = self.policy(tf.convert_to_tensor(states, dtype=tf.float32))
-            states_next_policy_actions = tf.concat((states, next_policy_actions), axis=-1)
-            policy_loss = - tf.reduce_mean(self.value(states_next_policy_actions))
-            policy_gradients = tape2.gradient(policy_loss, self.policy.trainable_variables)
-        self.policy_optimizer.apply_gradients(zip(policy_gradients, self.policy.trainable_variables))
+        states, next_states, actions, rewards, done = batch['obs1'], batch['obs2'], \
+                                                      batch['acts'], batch['rews'], \
+                                                      batch['done']
+
         # value optimization
         with tf.GradientTape() as tape:
-            Qvals = self.value(tf.convert_to_tensor(states_actions, dtype=tf.float32))
+            value_loss = self._value_loss(states, actions, next_states, rewards, done)
 
-            next_actions = self.policy_target(tf.convert_to_tensor(next_states, dtype=tf.float32))
-
-            next_states_next_actions = tf.concat((next_states, next_actions), axis=-1)
-            next_Q = self.value_target(next_states_next_actions)
-
-            Qprime = rewards + self.gamma * (1-done) * next_Q
-
-            value_loss = tf.reduce_mean((Qvals - Qprime)**2)
             value_gradients = tape.gradient(value_loss, self.value.trainable_variables)
         self.value_optimizer.apply_gradients(zip(value_gradients, self.value.trainable_variables))
 
+        # policy optimization
+        with tf.GradientTape() as tape2:
+            policy_loss = self._policy_loss(states)
+            policy_gradients = tape2.gradient(policy_loss, self.policy.trainable_variables)
+        self.policy_optimizer.apply_gradients(zip(policy_gradients, self.policy.trainable_variables))
+
+
+
+        # updating target network
         temp1 = np.array(self.value_target.get_weights())
         temp2 = np.array(self.value.get_weights())
         temp3 = self.tau * temp1 + (1 - self.tau) * temp2
@@ -105,32 +120,41 @@ class DDPG:
         temp2 = np.array(self.policy.get_weights())
         temp3 = self.tau * temp1 + (1 - self.tau) * temp2
         self.policy_target.set_weights(temp3)
-    def drill(self):
 
-
+    @ray.remote
+    def gather(self):
         is_done = False
-        observation = self.env.reset()
-        for i in range(self.buffer_size):
+        observation, episode_reward = self.env.reset(), 0
+
+        while not is_done:
             self.step_counter += 1
-            action = self.explore(observation)
+            if self.step_counter > self.start_steps:
+                action = self.get_action(observation)
+            else:
+                action = self.env.action_space.sample()
 
             next_observation, reward, is_done, info = self.env.step(action)
-            self.rewards.append(reward)
+            episode_reward += reward
             # update buffer
             self.replay_buffer.store(observation, action, reward, next_observation, is_done)
             observation = next_observation
 
-            if is_done:
-                observation = self.env.reset()
-                is_done = False
 
-            if self.step_counter % self.update_every == 0:
-                for k in range(100):
+    def drill(self):
 
-                    batch = self.replay_buffer.sample_batch(self.batch_size)
-                    self._learn_on_batch(batch)
+        ray.init(num_cpus=10)
 
-                self.test_env(3)
+        h = [self.gather.remote() for episode in range(100)]
+        ray.get(h)
+        if self.step_counter % 200 == 0:
+            for i in range(100):
+                batch = self.replay_buffer.sample_batch(self.batch_size)
+                self._learn_on_batch(batch)
+        self.rewards.append(episode_reward)
+        print(episode_reward)
+        self.test_env(3)
+
+
 
     def test_env(self, num_episodes=1):
         #t0 = datetime.now()
