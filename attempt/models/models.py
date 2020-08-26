@@ -1,42 +1,25 @@
 import tensorflow as tf
-import gym
-from attempt.utilities.utils import env_extract_dims
-from attempt.models.components import _build_encoding_sub_model
+from tensorflow.keras.layers import Input, Dense, concatenate
 
 
-from typing import Tuple, Union
+def Critic_gen(state_size, action_size, hidden_layers):
+    input_x = Input(shape=state_size)
+    input_a = Input(shape=action_size)
+    x = input_x
+    for i, j in enumerate(hidden_layers[:-1]):
+        if i == 1:
+            x = concatenate([x, input_a], axis=-1)
+        x = Dense(j, activation='relu')(x)
+    x = Dense(hidden_layers[-1])(x)
+
+    return tf.keras.Model([input_x, input_a], x)
 
 
-def build_ffn_models(env: gym.Env, shared: bool = False,
-                     layer_sizes: Tuple = (64, 64)):
-    """Build simple two-layer model."""
-
-    # preparation
-    state_dimensionality, n_actions = env_extract_dims(env)
-
-    # input preprocessing
-    inputs_value = tf.keras.Input(shape=(state_dimensionality + n_actions,))
-    inputs_policy = tf.keras.Input(shape=state_dimensionality)
-    # policy network
-
-    latent = _build_encoding_sub_model(inputs_policy.shape[1:], None, layer_sizes=(512, 200, 128),
-                                       name="policy_encoder")(inputs_policy)
-    x = tf.keras.layers.Dense(n_actions)(latent)
-    out_policy = tf.keras.layers.Activation("tanh")(x)
-
-    policy = tf.keras.Model(inputs=inputs_policy, outputs=out_policy, name="policy")
-
-    # value network
-    if not shared:
-        value_latent = _build_encoding_sub_model(inputs_value.shape[1:], None, layer_sizes=(500, 128),
-                                                 name="value_encoder")(inputs_value)
-        value_out = tf.keras.layers.Dense(1, kernel_initializer=tf.keras.initializers.Orthogonal(1.0),
-                                          bias_initializer=tf.keras.initializers.Constant(0.0))(value_latent)
-    else:
-        value_out = tf.keras.layers.Dense(1, input_dim=layer_sizes[-1])(latent)
-
-    value = tf.keras.Model(inputs=inputs_value, outputs=value_out, name="value")
-    policy_target = tf.keras.Model(inputs=inputs_policy, outputs=out_policy, name="policy_target")
-    value_target = tf.keras.Model(inputs=inputs_value, outputs=value_out, name="value_target")
-
-    return policy, value, policy_target, value_target
+def Actor_gen(state_size, action_size, hidden_layers, action_mult=1):
+    input_x = Input(shape=state_size)
+    x = input_x
+    for i in hidden_layers:
+        x = Dense(i, activation='relu')(x)
+    x = Dense(action_size, activation='tanh')(x)
+    x = tf.math.multiply(x, action_mult)
+    return tf.keras.Model(input_x, x)
