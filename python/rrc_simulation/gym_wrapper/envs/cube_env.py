@@ -183,11 +183,11 @@ class CubeEnv(gym.GoalEnv):
                     info,
                 )
         """
-        return -move_cube.evaluate_state(
+        return np.float32((move_cube.evaluate_state(
             move_cube.Pose.from_dict(desired_goal),
             move_cube.Pose.from_dict(achieved_goal),
             info["difficulty"],
-        )
+        ) < 0.1))
 
     def step(self, action):
         """Run one timestep of the environment's dynamics.

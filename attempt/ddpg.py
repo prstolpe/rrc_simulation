@@ -1,10 +1,13 @@
 import numpy as np
 import tensorflow as tf
 import gym
-import ray
 
-from attempt.utilities.utils import env_extract_dims
+from collections import deque
+from attempt.utilities.utils import env_extract_dims, flatten_goal_observation
 from attempt.models.models import Critic_gen, Actor_gen
+from attempt.utilities.her import HER
+import random
+
 
 class ReplayBuffer:
 
@@ -32,10 +35,18 @@ class ReplayBuffer:
                          a=self.acts_buf[idxs],
                          r=self.rews_buf[idxs],
                          d=self.done_buf[idxs])
-        return (temp_dict['s'], temp_dict['a'], temp_dict['r'].reshape(-1, 1), temp_dict['s2'], temp_dict['d'])
+        return temp_dict['s'], temp_dict['a'], temp_dict['r'].reshape(-1, 1), temp_dict['s2'], temp_dict['d']
 
+    def retrieve_last(self, sample_size=20):
+        idxs = np.arange(self.itr - sample_size, self.itr)
+        temp_dict = dict(s=self.obs1_buf[idxs],
+                         s2=self.obs2_buf[idxs],
+                         a=self.acts_buf[idxs],
+                         r=self.rews_buf[idxs],
+                         d=self.done_buf[idxs])
+        return temp_dict['s'], temp_dict['a'], temp_dict['r'].reshape(-1, 1), temp_dict['s2'], temp_dict['d']
 
-class DDPG:
+class DDPG(object):
 
     def __init__(self, env:gym.Env, buffer_size:int=int(1e5), seed:int=5, num_episodes:int=30,
                  batch_size=16, gamma:int=0.99, tau:int=1e-2, start_steps:int=1000, actor_lr=1e-3,
@@ -79,7 +90,7 @@ class DDPG:
 
     def get_action(self, s):
 
-        a = self.policy(s.reshape(1, -1))[0]
+        a = self.policy(s.reshape(1, -1).astype(np.float32))[0]
         a += 0.1 * np.random.randn(self.act_dim)
         return np.clip(a, self.act_low, self.act_high)
 
@@ -91,12 +102,13 @@ class DDPG:
         Qvals = self.value([states, actions])
         next_actions = self.policy_target(next_states)
         next_Q = self.value_target([next_states, next_actions])
-        Qprime = rewards + self.gamma * (1 - done) * next_Q
+        Qprime = rewards + self.gamma * (1 - done[0]) * next_Q
 
         return tf.reduce_mean(tf.square(Qvals - Qprime))
 
     def _learn_on_batch(self, batch):
-        states, actions, rewards, next_states, done = batch
+        states, actions, rewards, next_states, done = zip(*batch)
+
         states = np.asarray(states, dtype=np.float32)
         actions = np.asarray(actions, dtype=np.float32)
         rewards = np.asarray(rewards, dtype=np.float32)
@@ -170,6 +182,124 @@ class DDPG:
                 episode_length += 1
                 n_steps += 1
             print('test return:', episode_return, 'episode_length:', episode_length)
+
+
+class HERDDPG(DDPG):
+
+    def __init__(self, env:gym.GoalEnv, buffer_size:int=int(1e5), seed:int=5, num_episodes:int=800,
+                 batch_size=32, gamma:int=0.99, tau:int=1e-2, start_steps:int=500, actor_lr=1e-3,
+                 value_lr=1e-3, epochs:int=100):
+
+        super().__init__(env=env, buffer_size=buffer_size, seed=seed, num_episodes=num_episodes,
+                         batch_size=batch_size, gamma=gamma, tau=tau, start_steps=start_steps,
+                         actor_lr=actor_lr, value_lr=value_lr)
+        self.observation_names = ["observation", "achieved_goal", "desired_goal"]
+        self.obs_dim = sum([
+                            self.env.observation_space[name].shape[0]
+                            for name in self.observation_names
+                        ])
+
+        self.obs_indices = np.arange(0, self.env.observation_space["observation"].shape[0])
+        self.achieved_indices = np.arange(self.env.observation_space["observation"].shape[0],
+                                          (self.env.observation_space["observation"].shape[0] +
+                                          self.env.observation_space["achieved_goal"].shape[0]))
+        self.desired_indices = np.arange((self.env.observation_space["observation"].shape[0] +
+                                          self.env.observation_space["achieved_goal"].shape[0]),
+                                         (self.env.observation_space["observation"].shape[0] +
+                                          self.env.observation_space["achieved_goal"].shape[0] +
+                                          self.env.observation_space["desired_goal"].shape[0]))
+
+        self.replay_buffer = ReplayBuffer(self.obs_dim, self.act_dim, self.buffer_size)
+        self.her_replay_buffer = ReplayBuffer(self.obs_dim, self.act_dim, self.buffer_size)
+
+        # networks
+        self.policy = Actor_gen(self.obs_dim, self.act_dim, hidden_layers=(512, 200, 128), action_mult=self.act_high)
+        self.value = Critic_gen(self.obs_dim, self.act_dim, hidden_layers=(1024, 512, 300, 1))
+
+        self.policy_target = Actor_gen(self.obs_dim, self.act_dim, hidden_layers=(512, 200, 128), action_mult=self.act_high)
+        self.value_target = Critic_gen(self.obs_dim, self.act_dim, hidden_layers=(1024, 512, 300, 1))
+        self.policy_target.set_weights(self.policy.get_weights())
+        self.value_target.set_weights(self.value.get_weights())
+
+        self.epochs = epochs
+        self.replay_buffer = deque()
+        self.her = HER(self.desired_indices, self.achieved_indices, self.obs_indices)
+
+    def gather(self):
+
+        for episode in range(500):
+
+            is_done = False
+            observation, episode_reward = self.env.reset(), 0
+            observation = flatten_goal_observation(observation, self.observation_names)
+            while not is_done:
+                self.step_counter += 1
+                if self.step_counter > self.start_steps:
+                    action = self.get_action(observation)
+                else:
+                    action = self.env.action_space.sample()
+
+                next_observation, reward, is_done, info = self.env.step(action)
+                episode_reward += reward
+                # update buffer
+                next_observation = flatten_goal_observation(next_observation, self.observation_names)
+
+                self.replay_buffer.append([observation, action, reward, next_observation, is_done])
+                observation = next_observation
+
+    def train(self):
+        for i in range(100):
+            num = len(self.replay_buffer)
+            K = np.min([num, self.batch_size])
+            batch = random.sample(self.replay_buffer, K)
+            self._learn_on_batch(batch)
+
+
+    def gather_her(self):
+
+        for epoch in range(4000):
+            self.her.reset()
+            is_done = False
+            observation, episode_reward = self.env.reset(), 0
+            observation = flatten_goal_observation(observation, self.observation_names)
+            while not is_done:
+                self.step_counter += 1
+                if self.step_counter > self.start_steps:
+                    action = self.get_action(observation)
+                else:
+                    action = self.env.action_space.sample()
+
+                next_observation, reward, is_done, info = self.env.step(action)
+                episode_reward += reward
+                # update buffer
+                next_observation = flatten_goal_observation(next_observation, self.observation_names)
+
+                if self.step_counter % 4 == 0:
+                    self.replay_buffer.append([observation, action, reward, next_observation, is_done])
+                self.her.keep([observation, action, reward, next_observation, is_done])
+                observation = next_observation
+                num = len(self.replay_buffer)
+                K = np.min([num, self.batch_size])
+                batch = random.sample(self.replay_buffer, K)
+                self._learn_on_batch(batch)
+            print("Episode " + str(self.step_counter/50) + ": " + str(episode_reward) + "losses:" + str(self.policy_losses))
+            her_list = self.her.backward()
+            for item in her_list:
+                self.replay_buffer.append(item)
+
+    def drill(self):
+        for _ in range(5):
+            self.gather()
+            self.gather_her()
+            self.train()
+
+
+
+
+
+
+
+
 
 
 

@@ -4,6 +4,7 @@
 from typing import Tuple, Union
 
 import gym
+import numpy as np
 
 from gym.spaces import Discrete, Box, Dict
 
@@ -36,3 +37,9 @@ def env_extract_dims(env: gym.Env) -> Tuple[Union[int, Tuple[int]], int]:
         raise NotImplementedError(f"Environment has unknown Action Space Typ: {env.action_space}")
 
     return obs_dim, act_dim
+
+
+def flatten_goal_observation(obs, obs_names):
+    observation = [obs[name].flatten() for name in obs_names]
+
+    return np.concatenate(observation)
