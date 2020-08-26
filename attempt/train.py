@@ -5,12 +5,16 @@ import numpy as np
 import matplotlib.pyplot as plt
 import ray
 import os
+<<<<<<< HEAD
 from tqdm import tqdm
 from collections import deque
+=======
+>>>>>>> 16a1ffa... DDPG working fine
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
 
 if __name__ == "__main__":
 
+<<<<<<< HEAD
     env = gym.make('FetchReach-v1')
     ray.init(num_cpus=8)
     agents = [RemoteHERDDPG.remote(env) for _ in range(8)]
@@ -46,3 +50,9 @@ if __name__ == "__main__":
     env.close()
     ray.shutdown()
 
+=======
+
+    env = gym.make('Pendulum-v0')
+    agent = DDPG(env)
+    agent.drill()
+>>>>>>> 16a1ffa... DDPG working fine

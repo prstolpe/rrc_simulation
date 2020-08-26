@@ -11,6 +11,11 @@ import random
 
 import ray
 
+<<<<<<< HEAD
+=======
+from attempt.utilities.utils import env_extract_dims
+from attempt.models.models import Critic_gen, Actor_gen
+>>>>>>> 16a1ffa... DDPG working fine
 
 #############This noise code is copied from openai baseline #########OrnsteinUhlenbeckActionNoise############# Openai Code#########
 
@@ -32,24 +37,43 @@ class OrnsteinUhlenbeckActionNoise:
     def reset(self):
         self.x_prev = self.x0 if self.x0 is not None else np.zeros_like(self.mu)
 
+<<<<<<< HEAD
     def __repr__(self):
         return 'OrnsteinUhlenbeckActionNoise(mu={}, sigma={})'.format(self.mu, self.sigma)
+=======
+    def sample_batch(self, batch_size=32):
+        idxs = np.random.randint(0, self.size, size=batch_size)
+        temp_dict = dict(s=self.obs1_buf[idxs],
+                         s2=self.obs2_buf[idxs],
+                         a=self.acts_buf[idxs],
+                         r=self.rews_buf[idxs],
+                         d=self.done_buf[idxs])
+        return (temp_dict['s'], temp_dict['a'], temp_dict['r'].reshape(-1, 1), temp_dict['s2'], temp_dict['d'])
+>>>>>>> 16a1ffa... DDPG working fine
 
 
 #########################################################################################################
 
+<<<<<<< HEAD
 
 class DDPG(object):
 
     def __init__(self, env:gym.Env, buffer_size:int=int(1e6), seed:int=5, num_episodes:int=25,
                  batch_size=32, gamma:int=0.99, tau:int=1e-2, start_steps:int=1000, actor_lr=1e-4,
+=======
+    def __init__(self, env:gym.Env, buffer_size:int=int(1e5), seed:int=5, num_episodes:int=30,
+                 batch_size=16, gamma:int=0.99, tau:int=1e-2, start_steps:int=1000, actor_lr=1e-3,
+>>>>>>> 16a1ffa... DDPG working fine
                  value_lr=1e-3):
 
         # env
         self.obs_dim, self.act_dim = env_extract_dims(env)
         self.env = env
         self.act_low, self.act_high = self.env.action_space.low, self.env.action_space.high
+<<<<<<< HEAD
         self.ep_len = env.spec.max_episode_steps
+=======
+>>>>>>> 16a1ffa... DDPG working fine
 
         # replay buffer
         self.buffer_size = buffer_size
@@ -59,7 +83,11 @@ class DDPG(object):
         self.policy = Actor_gen(self.obs_dim, self.act_dim, hidden_layers=(512, 200, 128), action_mult=self.act_high)
         self.value = Critic_gen(self.obs_dim, 1, hidden_layers=(1024, 512, 300, 1))
 
+<<<<<<< HEAD
         self.policy_target = Actor_gen(self.obs_dim, self.act_dim, hidden_layers=(512, 200, 128), action_mult=self.act_high)
+=======
+        self.policy_target = Actor_gen(self.obs_dim, self.act_dim, hidden_layers=(512, 200, 128))
+>>>>>>> 16a1ffa... DDPG working fine
         self.value_target = Critic_gen(self.obs_dim, 1, hidden_layers=(1024, 512, 300, 1))
         self.policy_target.set_weights(self.policy.get_weights())
         self.value_target.set_weights(self.value.get_weights())
@@ -70,6 +98,7 @@ class DDPG(object):
         # ddpg hyperparameters
         self.gamma = gamma
         self.tau = tau
+        self.num_episodes = num_episodes
 
         self.num_episodes = num_episodes
         np.random.seed(seed)
@@ -103,13 +132,20 @@ class DDPG(object):
         return tf.reduce_mean(tf.square(Qvals - Qprime))
 
     def _learn_on_batch(self, batch):
+<<<<<<< HEAD
         states, actions, rewards, next_states, done = zip(*batch)
 
+=======
+        states, actions, rewards, next_states, done = batch
+>>>>>>> 16a1ffa... DDPG working fine
         states = np.asarray(states, dtype=np.float32)
         actions = np.asarray(actions, dtype=np.float32)
         rewards = np.asarray(rewards, dtype=np.float32)
         next_states = np.asarray(next_states, dtype=np.float32)
+<<<<<<< HEAD
         done = np.asarray(done, dtype=np.float32)
+=======
+>>>>>>> 16a1ffa... DDPG working fine
         # value optimization
         with tf.GradientTape() as tape:
             value_loss = self._value_loss(states, actions, next_states, rewards, done)
@@ -137,6 +173,7 @@ class DDPG(object):
         self.policy_target.set_weights(temp3)
 
     def drill(self):
+<<<<<<< HEAD
 
         for episode in range(self.num_episodes):
 
@@ -158,6 +195,28 @@ class DDPG(object):
                 if len(self.replay_buffer) > self.batch_size:
 
                     batch = random.sample(self.replay_buffer, self.batch_size)
+=======
+
+        for episode in range(self.num_episodes):
+
+            is_done = False
+            observation, episode_reward = self.env.reset(), 0
+
+            while not is_done:
+                self.step_counter += 1
+                if self.step_counter > self.start_steps:
+                    action = self.get_action(observation)
+                else:
+                    action = self.env.action_space.sample()
+
+                next_observation, reward, is_done, info = self.env.step(action)
+                episode_reward += reward
+                # update buffer
+                self.replay_buffer.store(observation, action, reward, next_observation, is_done)
+                observation = next_observation
+                if self.replay_buffer.size > self.batch_size:
+                    batch = self.replay_buffer.sample_batch(self.batch_size)
+>>>>>>> 16a1ffa... DDPG working fine
                     self._learn_on_batch(batch)
 
                 if is_done:
