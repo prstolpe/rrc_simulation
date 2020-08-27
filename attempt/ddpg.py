@@ -6,6 +6,7 @@ from collections import deque
 from attempt.utilities.utils import env_extract_dims, flatten_goal_observation
 from attempt.models.models import Critic_gen, Actor_gen
 from attempt.utilities.her import HER
+from attempt.utilities.wrappers import StateNormalizationWrapper
 import random
 
 import ray
@@ -129,8 +130,7 @@ class DDPG(object):
             policy_gradients = tape2.gradient(policy_loss, self.policy.trainable_variables)
         self.policy_optimizer.apply_gradients(zip(policy_gradients, self.policy.trainable_variables))
 
-
-
+    def update_target(self):
         # updating target network
         temp1 = np.array(self.value_target.get_weights())
         temp2 = np.array(self.value.get_weights())
@@ -142,6 +142,7 @@ class DDPG(object):
         temp2 = np.array(self.policy.get_weights())
         temp3 = self.tau * temp2 + (1 - self.tau) * temp1
         self.policy_target.set_weights(temp3)
+
 
     def drill(self):
 
@@ -178,8 +179,9 @@ class DDPG(object):
         for j in range(num_episodes):
             s, episode_return, episode_length, d = self.env.reset(), 0, 0, False
             while not d:
-                # Take deterministic actions at test time (noise_scale=0)
-                s, r, d, _ = self.env.step(self.policy(s.reshape(1, -1).astype(np.float32))[0])
+
+                s, r, d, i = self.env.step(self.policy_target(s.reshape(1, -1).astype(np.float32))[0])
+
                 episode_return += r
                 episode_length += 1
                 n_steps += 1
@@ -227,6 +229,9 @@ class HERDDPG(DDPG):
         self.replay_buffer = deque()
         self.her = HER(self.desired_indices, self.achieved_indices, self.obs_indices)
 
+        self.wrapper = StateNormalizationWrapper(self.obs_dim, self.observation_names)
+        self.wrapper.warmup(self.env)
+
     def unload(self):
 
         return self.replay_buffer
@@ -234,6 +239,14 @@ class HERDDPG(DDPG):
     def clear_buffer(self):
 
         self.replay_buffer = deque()
+
+    def clean_buffer(self):
+
+        del self.replay_buffer[:50000]
+
+    def update_wrapper(self, wrapper):
+
+        self.wrapper = wrapper
 
     def get_updated_policy(self, policy, value, value_target, policy_target):
 
@@ -250,11 +263,12 @@ class HERDDPG(DDPG):
             s = flatten_goal_observation(s, self.observation_names)
             while not d:
                 # Take deterministic actions at test time (noise_scale=0)
-                s, r, d, _ = self.env.step(self.policy(s.reshape(1, -1).astype(np.float32))[0])
+                s, r, d, i = self.env.step(self.policy(s.reshape(1, -1).astype(np.float32))[0])
                 episode_return += r
                 episode_length += 1
                 n_steps += 1
                 s = flatten_goal_observation(s, self.observation_names)
+                s, r, d, i = self.wrapper.modulate((s, r, d, i), update=False)
             print('test return:', episode_return, 'episode_length:', episode_length)
 
     def gather(self):
@@ -275,6 +289,7 @@ class HERDDPG(DDPG):
                 episode_reward += reward
                 # update buffer
                 next_observation = flatten_goal_observation(next_observation, self.observation_names)
+                next_observation, reward, is_done, info = self.wrapper.modulate((next_observation, reward, is_done, info))
 
                 self.replay_buffer.append([observation, action, reward, next_observation, is_done])
                 observation = next_observation
@@ -305,7 +320,7 @@ class HERDDPG(DDPG):
                 # update buffer
                 next_observation = flatten_goal_observation(next_observation, self.observation_names)
 
-
+                next_observation, reward, is_done, info = self.wrapper.modulate((next_observation, reward, is_done, info))
                 # self.replay_buffer.append([observation, action, reward, next_observation, is_done])
                 self.her.keep([observation, action, reward, next_observation, is_done])
                 observation = next_observation
@@ -319,7 +334,7 @@ class HERDDPG(DDPG):
 
         self.gather()
         self.gather_her()
-        return self.rewards
+        return (self.rewards, self.wrapper)
 
 
 @ray.remote

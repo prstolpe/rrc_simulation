@@ -21,5 +21,5 @@ def Actor_gen(state_size, action_size, hidden_layers, action_mult=1):
     for i in hidden_layers:
         x = Dense(i, activation='relu')(x)
     x = Dense(action_size, activation='tanh')(x)
-    x = tf.math.multiply(x, action_mult)
+    x = tf.math.multiply(x, 5)
     return tf.keras.Model(input_x, x)

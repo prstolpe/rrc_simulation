@@ -1,4 +1,5 @@
 from attempt.ddpg import HERDDPG, RemoteHERDDPG
+from attempt.utilities.wrappers import StateNormalizationWrapper
 import gym
 import numpy as np
 import matplotlib.pyplot as plt
@@ -15,27 +16,31 @@ if __name__ == "__main__":
     target_agent = HERDDPG(env)
     for epoch in range(200):
         for cycle in range(50):
-            rewards = ray.get([agent.major_gather.remote() for agent in agents])
+            rewards, wrappers = zip(*ray.get([agent.major_gather.remote() for agent in agents]))
             for agent in agents:
                 # unload buffer
                 experience = ray.get(agent.unload.remote())
                 for exp in experience:
                     target_agent.replay_buffer.append(exp)
                 agent.clear_buffer.remote()
+            # handle wrappers
+            nw = wrappers[0]
+            for wrapper in wrappers[1:]:
+                nw += wrapper
             target_agent.train()
+            target_agent.update_target()
+            target_agent.update_wrapper(nw)
             for agent in agents:
                 agent.get_updated_policy.remote(target_agent.policy.get_weights(), target_agent.value.get_weights(),
                                                 target_agent.value_target.get_weights(),
                                                 target_agent.policy_target.get_weights())
+                agent.update_wrapper.remote(nw)
 
-        target_agent.test_env(5)
-        print("Epoch: " + str(epoch+1) + " mean reward: " + str(np.mean(np.vstack(rewards[0]))) +
-              " Success rate: " + str(1 - (np.abs(np.mean(np.vstack(rewards[0])[-2000:]))/50)))
+        target_agent.test_env(20)
+        print("Epoch: " + str(epoch+1))
+
         if len(target_agent.replay_buffer) > int(1e6):
-            target_agent.clear_buffer()
-
-
-
+            target_agent.clean_buffer()
 
     env.close()
     ray.shutdown()
