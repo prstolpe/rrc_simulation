@@ -8,6 +8,8 @@ from attempt.models.models import Critic_gen, Actor_gen
 from attempt.utilities.her import HER
 import random
 
+import ray
+
 
 class ReplayBuffer:
 
@@ -177,17 +179,17 @@ class DDPG(object):
             s, episode_return, episode_length, d = self.env.reset(), 0, 0, False
             while not d:
                 # Take deterministic actions at test time (noise_scale=0)
-                s, r, d, _ = self.env.step(self.policy(tf.convert_to_tensor([s]))[0])
+                s, r, d, _ = self.env.step(self.policy(s.reshape(1, -1).astype(np.float32))[0])
                 episode_return += r
                 episode_length += 1
                 n_steps += 1
             print('test return:', episode_return, 'episode_length:', episode_length)
 
-
+@ray.remote
 class HERDDPG(DDPG):
 
     def __init__(self, env:gym.GoalEnv, buffer_size:int=int(1e5), seed:int=5, num_episodes:int=800,
-                 batch_size=32, gamma:int=0.99, tau:int=1e-2, start_steps:int=500, actor_lr=1e-3,
+                 batch_size=128, gamma:int=0.99, tau:int=1e-2, start_steps:int=500, actor_lr=1e-3,
                  value_lr=1e-3, epochs:int=100):
 
         super().__init__(env=env, buffer_size=buffer_size, seed=seed, num_episodes=num_episodes,
@@ -213,11 +215,11 @@ class HERDDPG(DDPG):
         self.her_replay_buffer = ReplayBuffer(self.obs_dim, self.act_dim, self.buffer_size)
 
         # networks
-        self.policy = Actor_gen(self.obs_dim, self.act_dim, hidden_layers=(512, 200, 128), action_mult=self.act_high)
-        self.value = Critic_gen(self.obs_dim, self.act_dim, hidden_layers=(1024, 512, 300, 1))
+        self.policy = Actor_gen(self.obs_dim, self.act_dim, hidden_layers=(512, 512, 200, 128), action_mult=self.act_high)
+        self.value = Critic_gen(self.obs_dim, self.act_dim, hidden_layers=(1024, 512, 512, 300, 1))
 
-        self.policy_target = Actor_gen(self.obs_dim, self.act_dim, hidden_layers=(512, 200, 128), action_mult=self.act_high)
-        self.value_target = Critic_gen(self.obs_dim, self.act_dim, hidden_layers=(1024, 512, 300, 1))
+        self.policy_target = Actor_gen(self.obs_dim, self.act_dim, hidden_layers=(512, 512, 200, 128), action_mult=self.act_high)
+        self.value_target = Critic_gen(self.obs_dim, self.act_dim, hidden_layers=(1024, 512, 512, 300, 1))
         self.policy_target.set_weights(self.policy.get_weights())
         self.value_target.set_weights(self.value.get_weights())
 
@@ -227,7 +229,7 @@ class HERDDPG(DDPG):
 
     def gather(self):
 
-        for episode in range(500):
+        for episode in range(200):
 
             is_done = False
             observation, episode_reward = self.env.reset(), 0
@@ -248,16 +250,15 @@ class HERDDPG(DDPG):
                 observation = next_observation
 
     def train(self):
-        for i in range(100):
+        for i in range(2400):
             num = len(self.replay_buffer)
             K = np.min([num, self.batch_size])
             batch = random.sample(self.replay_buffer, K)
             self._learn_on_batch(batch)
 
-
     def gather_her(self):
 
-        for epoch in range(4000):
+        for epoch in range(600):
             self.her.reset()
             is_done = False
             observation, episode_reward = self.env.reset(), 0
@@ -274,24 +275,23 @@ class HERDDPG(DDPG):
                 # update buffer
                 next_observation = flatten_goal_observation(next_observation, self.observation_names)
 
-                if self.step_counter % 4 == 0:
-                    self.replay_buffer.append([observation, action, reward, next_observation, is_done])
+
+                # self.replay_buffer.append([observation, action, reward, next_observation, is_done])
                 self.her.keep([observation, action, reward, next_observation, is_done])
                 observation = next_observation
-                num = len(self.replay_buffer)
-                K = np.min([num, self.batch_size])
-                batch = random.sample(self.replay_buffer, K)
-                self._learn_on_batch(batch)
-            print("Episode " + str(self.step_counter/50) + ": " + str(episode_reward) + "losses:" + str(self.policy_losses))
+
+            self.rewards.append(episode_reward)
             her_list = self.her.backward()
             for item in her_list:
                 self.replay_buffer.append(item)
 
-    def drill(self):
-        for _ in range(5):
-            self.gather()
-            self.gather_her()
-            self.train()
+    def major_gather(self):
+
+        self.gather()
+        self.gather_her()
+        return self.rewards
+
+
 
 
 
