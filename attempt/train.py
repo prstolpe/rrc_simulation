@@ -29,7 +29,7 @@ if __name__ == "__main__":
                                                 target_agent.policy_target.get_weights())
 
         target_agent.test_env(5)
-        print("Epoch: " + str(epoch+1) + " mean reward: " + str(np.mean(np.vstack(rewards[0])[-2000:])) +
+        print("Epoch: " + str(epoch+1) + " mean reward: " + str(np.mean(np.vstack(rewards[0]))) +
               " Success rate: " + str(1 - (np.abs(np.mean(np.vstack(rewards[0])[-2000:]))/50)))
         if len(target_agent.replay_buffer) > int(1e6):
             target_agent.clear_buffer()
