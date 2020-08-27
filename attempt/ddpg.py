@@ -93,7 +93,7 @@ class DDPG(object):
     def get_action(self, s):
 
         a = self.policy(s.reshape(1, -1).astype(np.float32))[0]
-        a += 0.1 * np.random.randn(self.act_dim)
+        a += 0.05 * np.random.randn(self.act_dim)
         return np.clip(a, self.act_low, self.act_high)
 
     def _policy_loss(self, states):
@@ -185,11 +185,11 @@ class DDPG(object):
                 n_steps += 1
             print('test return:', episode_return, 'episode_length:', episode_length)
 
-@ray.remote
+
 class HERDDPG(DDPG):
 
     def __init__(self, env:gym.GoalEnv, buffer_size:int=int(1e5), seed:int=5, num_episodes:int=800,
-                 batch_size=128, gamma:int=0.99, tau:int=1e-2, start_steps:int=500, actor_lr=1e-3,
+                 batch_size=128, gamma:int=0.98, tau:int=2e-2, start_steps:int=500, actor_lr=1e-3,
                  value_lr=1e-3, epochs:int=100):
 
         super().__init__(env=env, buffer_size=buffer_size, seed=seed, num_episodes=num_episodes,
@@ -215,11 +215,11 @@ class HERDDPG(DDPG):
         self.her_replay_buffer = ReplayBuffer(self.obs_dim, self.act_dim, self.buffer_size)
 
         # networks
-        self.policy = Actor_gen(self.obs_dim, self.act_dim, hidden_layers=(512, 512, 200, 128), action_mult=self.act_high)
-        self.value = Critic_gen(self.obs_dim, self.act_dim, hidden_layers=(1024, 512, 512, 300, 1))
+        self.policy = Actor_gen(self.obs_dim, self.act_dim, hidden_layers=(64, 64, 64), action_mult=self.act_high)
+        self.value = Critic_gen(self.obs_dim, self.act_dim, hidden_layers=(64, 64, 64, 1))
 
-        self.policy_target = Actor_gen(self.obs_dim, self.act_dim, hidden_layers=(512, 512, 200, 128), action_mult=self.act_high)
-        self.value_target = Critic_gen(self.obs_dim, self.act_dim, hidden_layers=(1024, 512, 512, 300, 1))
+        self.policy_target = Actor_gen(self.obs_dim, self.act_dim, hidden_layers=(64, 64, 64), action_mult=self.act_high)
+        self.value_target = Critic_gen(self.obs_dim, self.act_dim, hidden_layers=(64, 64, 64, 1))
         self.policy_target.set_weights(self.policy.get_weights())
         self.value_target.set_weights(self.value.get_weights())
 
@@ -227,16 +227,46 @@ class HERDDPG(DDPG):
         self.replay_buffer = deque()
         self.her = HER(self.desired_indices, self.achieved_indices, self.obs_indices)
 
+    def unload(self):
+
+        return self.replay_buffer
+
+    def clear_buffer(self):
+
+        self.replay_buffer = deque()
+
+    def get_updated_policy(self, policy, value, value_target, policy_target):
+
+        self.policy.set_weights(policy)
+        self.value.set_weights(value)
+        self.value_target.set_weights(value_target)
+        self.policy_target.set_weights(policy_target)
+
+    def test_env(self, num_episodes=1):
+
+        n_steps = 0
+        for j in range(num_episodes):
+            s, episode_return, episode_length, d = self.env.reset(), 0, 0, False
+            s = flatten_goal_observation(s, self.observation_names)
+            while not d:
+                # Take deterministic actions at test time (noise_scale=0)
+                s, r, d, _ = self.env.step(self.policy(s.reshape(1, -1).astype(np.float32))[0])
+                episode_return += r
+                episode_length += 1
+                n_steps += 1
+                s = flatten_goal_observation(s, self.observation_names)
+            print('test return:', episode_return, 'episode_length:', episode_length)
+
     def gather(self):
 
-        for episode in range(200):
+        for episode in range(4):
 
             is_done = False
             observation, episode_reward = self.env.reset(), 0
             observation = flatten_goal_observation(observation, self.observation_names)
             while not is_done:
                 self.step_counter += 1
-                if self.step_counter > self.start_steps:
+                if np.random.uniform() > 0.2:
                     action = self.get_action(observation)
                 else:
                     action = self.env.action_space.sample()
@@ -250,7 +280,7 @@ class HERDDPG(DDPG):
                 observation = next_observation
 
     def train(self):
-        for i in range(2400):
+        for i in range(40):
             num = len(self.replay_buffer)
             K = np.min([num, self.batch_size])
             batch = random.sample(self.replay_buffer, K)
@@ -258,14 +288,14 @@ class HERDDPG(DDPG):
 
     def gather_her(self):
 
-        for epoch in range(600):
+        for epoch in range(12):
             self.her.reset()
             is_done = False
             observation, episode_reward = self.env.reset(), 0
             observation = flatten_goal_observation(observation, self.observation_names)
             while not is_done:
                 self.step_counter += 1
-                if self.step_counter > self.start_steps:
+                if np.random.uniform() > 0.2:
                     action = self.get_action(observation)
                 else:
                     action = self.env.action_space.sample()
@@ -290,6 +320,11 @@ class HERDDPG(DDPG):
         self.gather()
         self.gather_her()
         return self.rewards
+
+
+@ray.remote
+class RemoteHERDDPG(HERDDPG):
+    pass
 
 
 
