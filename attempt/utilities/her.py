@@ -18,13 +18,15 @@ class HER:
 
     def backward(self):
         num = len(self.buffer)
-        goal = self.buffer[-1][-2][self.achieved_idx]
+        # goal = self.buffer[-1][-2][self.achieved_idx]
+        print(num)
         for i in range(num):
+            goal = self.buffer[-1 - i][-2][self.achieved_idx]
             self.buffer[-1 - i][-2][self.goal_idx] = goal
             self.buffer[-1 - i][0][self.goal_idx] = goal
             self.buffer[-1 - i][2] = -1.0
             self.buffer[-1 - i][4] = False
-            if np.sum(np.abs(self.buffer[-1 - i][-2][self.achieved_idx] - goal)) == 0:
+            if np.linalg.norm(self.buffer[-1 - i][-2][self.achieved_idx] - goal) < 0.05:
                 self.buffer[-1 - i][2] = 0.0
                 self.buffer[-1 - i][4] = True
         return self.buffer
