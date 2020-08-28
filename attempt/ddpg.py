@@ -2,6 +2,8 @@ import numpy as np
 import tensorflow as tf
 import gym
 import ray
+from collections import deque
+import random
 
 from attempt.utilities.utils import env_extract_dims
 from attempt.models.models import Critic_gen, Actor_gen
@@ -37,9 +39,8 @@ class ReplayBuffer:
 
 class DDPG:
 
-    def __init__(self, env:gym.Env, buffer_size:int=int(1e5), seed:int=5, num_episodes:int=30,
-                 batch_size=16, gamma:int=0.99, tau:int=1e-2, start_steps:int=1000, actor_lr=1e-3,
-                 value_lr=1e-3):
+    def __init__(self, env: gym.Env, buffer_size: int=int(1e5), gamma: int = 0.99, tau: int = 1e-2, start_steps: int=1000,
+                 batch_size=32, actor_lr=1e-3, value_lr=1e-3, seed: int=5):
 
         # env
         self.obs_dim, self.act_dim = env_extract_dims(env)
@@ -52,10 +53,10 @@ class DDPG:
 
         # networks
         self.policy = Actor_gen(self.obs_dim, self.act_dim, hidden_layers=(512, 200, 128), action_mult=self.act_high)
-        self.value = Critic_gen(self.obs_dim, 1, hidden_layers=(1024, 512, 300, 1))
+        self.value = Critic_gen(self.obs_dim, self.act_dim, hidden_layers=(1024, 512, 300, 1))
 
         self.policy_target = Actor_gen(self.obs_dim, self.act_dim, hidden_layers=(512, 200, 128))
-        self.value_target = Critic_gen(self.obs_dim, 1, hidden_layers=(1024, 512, 300, 1))
+        self.value_target = Critic_gen(self.obs_dim, self.act_dim, hidden_layers=(1024, 512, 300, 1))
         self.policy_target.set_weights(self.policy.get_weights())
         self.value_target.set_weights(self.value.get_weights())
 
@@ -65,10 +66,9 @@ class DDPG:
         # ddpg hyperparameters
         self.gamma = gamma
         self.tau = tau
-        self.num_episodes = num_episodes
+
 
         self.seed = np.random.seed(seed)
-        self.step_counter = 0
         self.start_steps = start_steps
         self.batch_size = batch_size
 
@@ -88,6 +88,7 @@ class DDPG:
         return - tf.reduce_mean(self.value([states, next_policy_actions]))
 
     def _value_loss(self, states, actions, next_states, rewards, done):
+
         Qvals = self.value([states, actions])
         next_actions = self.policy_target(next_states)
         next_Q = self.value_target([next_states, next_actions])
@@ -97,10 +98,11 @@ class DDPG:
 
     def _learn_on_batch(self, batch):
         states, actions, rewards, next_states, done = batch
-        states = np.asarray(states, dtype=np.float32)
-        actions = np.asarray(actions, dtype=np.float32)
-        rewards = np.asarray(rewards, dtype=np.float32)
-        next_states = np.asarray(next_states, dtype=np.float32)
+        #states = np.asarray(states, dtype=np.float64)
+        #actions = np.asarray(actions, dtype=np.float64)
+        #rewards = np.asarray(rewards, dtype=np.float64)
+        #next_states = np.asarray(next_states, dtype=np.float64)
+        #done = np.asarray(done, dtype=np.float64)
         # value optimization
         with tf.GradientTape() as tape:
             value_loss = self._value_loss(states, actions, next_states, rewards, done)
@@ -129,16 +131,16 @@ class DDPG:
         temp3 = self.tau * temp2 + (1 - self.tau) * temp1
         self.policy_target.set_weights(temp3)
 
-    def drill(self):
-
-        for episode in range(self.num_episodes):
+    def drill(self, num_episodes=25):
+        num_steps = 0
+        for episode in range(num_episodes):
 
             is_done = False
             observation, episode_reward = self.env.reset(), 0
 
             while not is_done:
-                self.step_counter += 1
-                if self.step_counter > self.start_steps:
+                num_steps += 1
+                if num_steps > self.start_steps:
                     action = self.get_action(observation)
                 else:
                     action = self.env.action_space.sample()
@@ -148,9 +150,12 @@ class DDPG:
                 # update buffer
                 self.replay_buffer.store(observation, action, reward, next_observation, is_done)
                 observation = next_observation
-                if self.replay_buffer.size > self.batch_size:
-                    batch = self.replay_buffer.sample_batch(self.batch_size)
-                    self._learn_on_batch(batch)
+
+                #n_samples = len(self.replay_buffer)
+                #K = np.min([n_samples, self.batch_size])
+                batch = self.replay_buffer.sample_batch(self.batch_size)
+                self._learn_on_batch(batch)
+
 
                 if is_done:
                     self.rewards.append(episode_reward)
