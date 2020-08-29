@@ -7,36 +7,8 @@ import random
 
 from attempt.utilities.utils import env_extract_dims, flatten_goal_observation
 from attempt.models.models import Critic_gen, Actor_gen
-from attempt.utilities.her import HER
-
-
-class ReplayBuffer:
-
-    def __init__(self, obs_dim, act_dim, buffer_size):
-        self.obs1_buf = np.zeros([buffer_size, obs_dim], dtype=np.float32)
-        self.obs2_buf = np.zeros([buffer_size, obs_dim], dtype=np.float32)
-        self.acts_buf = np.zeros([buffer_size, act_dim], dtype=np.float32)
-        self.rews_buf = np.zeros(buffer_size, dtype=np.float32)
-        self.done_buf = np.zeros(buffer_size, dtype=np.float32)
-        self.itr, self.size, self.max_size = 0, 0, buffer_size
-
-    def store(self, obs, act, rew, next_obs, done):
-        self.obs1_buf[self.itr] = obs
-        self.obs2_buf[self.itr] = next_obs
-        self.acts_buf[self.itr] = act
-        self.rews_buf[self.itr] = rew
-        self.done_buf[self.itr] = done
-        self.itr = (self.itr + 1) % self.max_size
-        self.size = min(self.size + 1, self.max_size)
-
-    def sample_batch(self, batch_size=32):
-        idxs = np.random.randint(0, self.size, batch_size)
-        temp_dict = dict(s=self.obs1_buf[idxs],
-                         s2=self.obs2_buf[idxs],
-                         a=self.acts_buf[idxs],
-                         r=self.rews_buf[idxs],
-                         d=self.done_buf[idxs])
-        return (temp_dict['s'], temp_dict['a'], temp_dict['r'].reshape(-1, 1), temp_dict['s2'], temp_dict['d'])
+from attempt.utilities.her import HER, make_sample_her_transitions
+from attempt.utilities.replay_buffer import PlainReplayBuffer, ReplayBuffer
 
 
 class DDPG:
@@ -51,7 +23,7 @@ class DDPG:
 
         # replay buffer
         self.buffer_size = buffer_size
-        self.replay_buffer = ReplayBuffer(self.obs_dim, self.act_dim, buffer_size)
+        self.replay_buffer = PlainReplayBuffer(self.obs_dim, self.act_dim, buffer_size)
 
         # networks
         self.policy = Actor_gen(self.obs_dim, self.act_dim, hidden_layers=(512, 200, 128), action_mult=self.act_high)
@@ -184,14 +156,22 @@ class HERDDPG(DDPG):
 
 
         self.obs_names = ['observation', 'desired_goal']
-        self.her_buffer = HER()
+        s = self.env.reset()
+        self.buffer_shapes = dict(o=s['observation'].shape[0],
+                                  g=s['desired_goal'].shape[0],
+                                  u=self.env.action_space.shape[0],
+                                  r=1,
+                                  info=1)
+        self.her_buffer = ReplayBuffer
 
         self.ep_len = self.env.spec.max_episode_steps
+
+        self.sample_transition = make_sample_her_transitions('future', 4, lambda: self.env.compute_reward())
 
     def drill(self, num_episodes=30):
         num_steps = 0
         self.actions = []
-        for epoch in range(10):
+        for epoch in range(2):
             for episode in range(num_episodes):
 
                 observation, episode_reward = self.env.reset(), 0
@@ -229,15 +209,19 @@ class HERDDPG(DDPG):
 
             self.test_env(3)
 
-    def test_env(self, num_episodes=1):
+    def test_env(self, num_episodes=1, render=False):
 
         n_steps = 0
         for j in range(num_episodes):
             s, episode_return, episode_length, d = self.env.reset(), 0, 0, False
             s = flatten_goal_observation(s, self.obs_names)
+            if render:
+                self.env.render()
             while not d:
                 # Take deterministic actions at test time (noise_scale=0)
                 s, r, d, _ = self.env.step(self.policy_target(s.reshape(1, -1))[0])
+                if render:
+                    self.env.render()
                 s = flatten_goal_observation(s, self.obs_names)
                 episode_return += r
                 episode_length += 1

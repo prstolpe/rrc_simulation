@@ -8,7 +8,6 @@ os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
 
 if __name__ == "__main__":
 
-
     env = gym.make('FetchReach-v1')
     agent = HERDDPG(env)
     agent.drill()

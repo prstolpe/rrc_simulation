@@ -2,6 +2,7 @@
 """Helper functions."""
 
 from typing import Tuple, Union
+from collections import OrderedDict
 
 import gym
 import numpy as np
@@ -16,14 +17,12 @@ def env_extract_dims(env: gym.Env) -> Tuple[Union[int, Tuple[int]], int]:
     if isinstance(env.observation_space, Dict):
         # dict observation with observation field
         if isinstance(env.observation_space["observation"], gym.spaces.Box):
-            obs_dim = env.observation_space["observation"].shape[0] + env.observation_space['desired_goal'].shape[0]
-        elif isinstance(env.observation_space["observation"], gym.spaces.Tuple):
-            # e.g. shadow hand environment with multiple inputs
-            obs_dim = tuple(field.shape for field in env.observation_space["observation"])
-        else:
-            raise ValueError(f"Cannot extract the dimensionality from a Dict observation space "
-                                                  f"where the observation is of type "
-                                                  f"{type(env.observation_space['observation']).__name__}")
+            if isinstance(env.observation_space.spaces, OrderedDict):
+                obs_dim = env.observation_space["observation"].shape[0] + env.observation_space['desired_goal'].shape[0]
+            else:
+                raise ValueError(f"Cannot extract the dimensionality from a Dict observation space "
+                                                      f"where the observation is of type "
+                                                      f"{type(env.observation_space['observation']).__name__}")
     else:
         # standard observation in box form
         obs_dim = env.observation_space.shape[0]
