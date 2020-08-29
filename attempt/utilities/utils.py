@@ -16,7 +16,7 @@ def env_extract_dims(env: gym.Env) -> Tuple[Union[int, Tuple[int]], int]:
     if isinstance(env.observation_space, Dict):
         # dict observation with observation field
         if isinstance(env.observation_space["observation"], gym.spaces.Box):
-            obs_dim = env.observation_space["observation"].shape[0]
+            obs_dim = env.observation_space["observation"].shape[0] + env.observation_space['desired_goal'].shape[0]
         elif isinstance(env.observation_space["observation"], gym.spaces.Tuple):
             # e.g. shadow hand environment with multiple inputs
             obs_dim = tuple(field.shape for field in env.observation_space["observation"])
