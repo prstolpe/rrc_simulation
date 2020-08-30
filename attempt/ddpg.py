@@ -7,8 +7,8 @@ import random
 
 from attempt.utilities.utils import env_extract_dims, flatten_goal_observation
 from attempt.models.models import Critic_gen, Actor_gen
-from attempt.utilities.her import HER, make_sample_her_transitions
-from attempt.utilities.replay_buffer import PlainReplayBuffer, ReplayBuffer
+from attempt.utilities.her import HERGoalEnvWrapper
+from attempt.utilities.replay_buffer import PlainReplayBuffer, HindsightExperienceReplayWrapper, ReplayBuffer, GoalSelectionStrategy
 
 
 class DDPG:
@@ -148,35 +148,31 @@ class DDPG:
 
 class HERDDPG(DDPG):
 
-    def __init__(self, env: gym.GoalEnv, buffer_size: int=int(1e5), gamma: int = 0.99, tau: int = 1e-2, start_steps: int=1000,
-                 noise_scale: float=0.1, batch_size=int(128), actor_lr=1e-3, value_lr=1e-3, seed: int=5):
+    def __init__(self, env: gym.GoalEnv, goal_selection_strategy=GoalSelectionStrategy.RANDOM, buffer_size: int=int(1e5),
+                 gamma: int = 0.99, tau: int = 1e-2, start_steps: int=1000, noise_scale: float=0.1,
+                 batch_size=int(128), actor_lr=1e-3, value_lr=1e-3, seed: int=5, k=4):
 
         super().__init__(env, buffer_size, gamma, tau, start_steps, noise_scale,
                          batch_size, actor_lr, value_lr, seed)
 
+        self.env = HERGoalEnvWrapper(env)
+        self.goal_selection_strategy = goal_selection_strategy
+        self.k = k
+        self.replay_buffer = HindsightExperienceReplayWrapper(ReplayBuffer(self.buffer_size), k,
+                                                              goal_selection_strategy, self.env)
+        self.ep_len = self.env.env.spec.max_episode_steps
 
-        self.obs_names = ['observation', 'desired_goal']
-        s = self.env.reset()
-        self.buffer_shapes = dict(o=s['observation'].shape[0],
-                                  g=s['desired_goal'].shape[0],
-                                  u=self.env.action_space.shape[0],
-                                  r=1,
-                                  info=1)
-        self.her_buffer = ReplayBuffer
+        print(f"Training HER + DDPG Agent on {self.env.env.spec.id} using \n"
+              f"{goal_selection_strategy} \n"
+              f"and k = {k}")
 
-        self.ep_len = self.env.spec.max_episode_steps
-
-        self.sample_transition = make_sample_her_transitions('future', 4, lambda: self.env.compute_reward())
-
-    def drill(self, num_episodes=30):
+    def drill(self, epochs=10, num_episodes=50):
         num_steps = 0
         self.actions = []
-        for epoch in range(2):
+        for epoch in range(epochs):
             for episode in range(num_episodes):
 
                 observation, episode_reward = self.env.reset(), 0
-                ac_obs = observation['achieved_goal']
-                observation = flatten_goal_observation(observation, self.obs_names)
                 for _ in range(self.ep_len):
                     num_steps += 1
                     if num_steps > self.start_steps:
@@ -186,26 +182,18 @@ class HERDDPG(DDPG):
 
                     next_observation, reward, is_done, info = self.env.step(action)
                     self.actions.append(action)
-                    next_ac_obs = next_observation['achieved_goal']
-                    next_observation = flatten_goal_observation(next_observation, self.obs_names)
+
                     episode_reward += reward
                     # update buffer
-                    self.replay_buffer.store(observation, action, reward, next_observation, is_done)
-                    self.her_buffer.keep([np.concatenate((observation, ac_obs), axis=-1)
-                                             , action, reward,
-                                          np.concatenate((next_observation, next_ac_obs), axis=-1), is_done])
+                    self.replay_buffer.add(observation, action, reward, next_observation, is_done, info)
                     observation = next_observation
-                    ac_obs = next_ac_obs
 
-                    batch = self.replay_buffer.sample_batch(self.batch_size)
-                    self._learn_on_batch(batch)
+                    if self.replay_buffer.can_sample(self.batch_size):
+                        batch = self.replay_buffer.sample(self.batch_size)
+                        self._learn_on_batch(batch)
+
                 self.rewards.append(episode_reward)
-                print("Epoch " + str(epoch) + "Episode " + str(episode) + ": " + str(episode_reward))
-
-                her_list = self.her_buffer.backward()
-                for observation, action, reward, next_observation, is_done in her_list:
-                    self.replay_buffer.store(observation[0:13], action, reward, next_observation[0:13], is_done)
-                self.her_buffer.reset()
+                print("Epoch " + str(epoch) + " Episode " + str(episode) + ": " + str(episode_reward) + " reward")
 
             self.test_env(3)
 
@@ -214,7 +202,6 @@ class HERDDPG(DDPG):
         n_steps = 0
         for j in range(num_episodes):
             s, episode_return, episode_length, d = self.env.reset(), 0, 0, False
-            s = flatten_goal_observation(s, self.obs_names)
             if render:
                 self.env.render()
             while not d:
@@ -222,7 +209,6 @@ class HERDDPG(DDPG):
                 s, r, d, _ = self.env.step(self.policy_target(s.reshape(1, -1))[0])
                 if render:
                     self.env.render()
-                s = flatten_goal_observation(s, self.obs_names)
                 episode_return += r
                 episode_length += 1
                 n_steps += 1

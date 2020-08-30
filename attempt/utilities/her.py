@@ -1,7 +1,9 @@
 from collections import deque
 import numpy as np
 import copy
-import numpy as np
+
+from collections import OrderedDict
+from gym import spaces
 
 class HER:
     def __init__(self):
@@ -28,64 +30,101 @@ class HER:
         return self.buffer
 
 
-def make_sample_her_transitions(replay_strategy, replay_k, reward_fun):
-    """Creates a sample function that can be used for HER experience replay.
-    Args:
-        replay_strategy (in ['future', 'none']): the HER replay strategy; if set to 'none',
-            regular DDPG experience replay is used
-        replay_k (int): the ratio between HER replays and regular replays (e.g. k = 4 -> 4 times
-            as many HER replays as regular replays are used)
-        reward_fun (function): function to re-compute the reward with substituted goals
+# Important: gym mixes up ordered and unordered keys
+# and the Dict space may return a different order of keys that the actual one
+KEY_ORDER = ['observation', 'achieved_goal', 'desired_goal']
+
+
+class HERGoalEnvWrapper(object):
     """
-    if replay_strategy == 'future':
-        future_p = 1 - (1. / (1 + replay_k))
-    else:  # 'replay_strategy' == 'none'
-        future_p = 0
+    A wrapper that allow to use dict observation space (coming from GoalEnv) with
+    the RL algorithms.
+    It assumes that all the spaces of the dict space are of the same type.
+    :param env: (gym.GoalEnv)
+    """
 
-    def _sample_her_transitions(episode_batch, batch_size_in_transitions):
-        """episode_batch is {key: array(buffer_size x T x dim_key)}
+    def __init__(self, env):
+        super(HERGoalEnvWrapper, self).__init__()
+        self.env = env
+        self.metadata = self.env.metadata
+        self.action_space = env.action_space
+        self.spaces = list(env.observation_space.spaces.values())
+        # Check that all spaces are of the same type
+        # (current limitation of the wrapper)
+        space_types = [type(env.observation_space.spaces[key]) for key in KEY_ORDER]
+        assert len(set(space_types)) == 1, "The spaces for goal and observation"\
+                                           " must be of the same type"
+
+        if isinstance(self.spaces[0], spaces.Discrete):
+            self.obs_dim = 1
+            self.goal_dim = 1
+        else:
+            goal_space_shape = env.observation_space.spaces['achieved_goal'].shape
+            self.obs_dim = env.observation_space.spaces['observation'].shape[0]
+            self.goal_dim = goal_space_shape[0]
+
+            if len(goal_space_shape) == 2:
+                assert goal_space_shape[1] == 1, "Only 1D observation spaces are supported yet"
+            else:
+                assert len(goal_space_shape) == 1, "Only 1D observation spaces are supported yet"
+
+        if isinstance(self.spaces[0], spaces.MultiBinary):
+            total_dim = self.obs_dim + 2 * self.goal_dim
+            self.observation_space = spaces.MultiBinary(total_dim)
+
+        elif isinstance(self.spaces[0], spaces.Box):
+            lows = np.concatenate([space.low for space in self.spaces])
+            highs = np.concatenate([space.high for space in self.spaces])
+            self.observation_space = spaces.Box(lows, highs, dtype=np.float32)
+
+        elif isinstance(self.spaces[0], spaces.Discrete):
+            dimensions = [env.observation_space.spaces[key].n for key in KEY_ORDER]
+            self.observation_space = spaces.MultiDiscrete(dimensions)
+
+        else:
+            raise NotImplementedError("{} space is not supported".format(type(self.spaces[0])))
+
+    def convert_dict_to_obs(self, obs_dict):
         """
-        T = episode_batch['u'].shape[1]
-        rollout_batch_size = episode_batch['u'].shape[0]
-        batch_size = batch_size_in_transitions
+        :param obs_dict: (dict<np.ndarray>)
+        :return: (np.ndarray)
+        """
+        # Note: achieved goal is not removed from the observation
+        # this is helpful to have a revertible transformation
+        if isinstance(self.observation_space, spaces.MultiDiscrete):
+            # Special case for multidiscrete
+            return np.concatenate([[int(obs_dict[key])] for key in KEY_ORDER])
+        return np.concatenate([obs_dict[key] for key in KEY_ORDER])
 
-        # Select which episodes and time steps to use.
-        episode_idxs = np.random.randint(0, rollout_batch_size, batch_size)
-        t_samples = np.random.randint(T, size=batch_size)
-        transitions = {key: episode_batch[key][episode_idxs, t_samples].copy()
-                       for key in episode_batch.keys()}
+    def convert_obs_to_dict(self, observations):
+        """
+        Inverse operation of convert_dict_to_obs
+        :param observations: (np.ndarray)
+        :return: (OrderedDict<np.ndarray>)
+        """
+        return OrderedDict([
+            ('observation', observations[:self.obs_dim]),
+            ('achieved_goal', observations[self.obs_dim:self.obs_dim + self.goal_dim]),
+            ('desired_goal', observations[self.obs_dim + self.goal_dim:]),
+        ])
 
-        # Select future time indexes proportional with probability future_p. These
-        # will be used for HER replay by substituting in future goals.
-        her_indexes = np.where(np.random.uniform(size=batch_size) < future_p)
-        future_offset = np.random.uniform(size=batch_size) * (T - t_samples)
-        future_offset = future_offset.astype(int)
-        future_t = (t_samples + 1 + future_offset)[her_indexes]
+    def step(self, action):
+        obs, reward, done, info = self.env.step(action)
+        return self.convert_dict_to_obs(obs), reward, done, info
 
-        # Replace goal with achieved goal but only for the previously-selected
-        # HER transitions (as defined by her_indexes). For the other transitions,
-        # keep the original goal.
-        future_ag = episode_batch['ag'][episode_idxs[her_indexes], future_t]
-        transitions['g'][her_indexes] = future_ag
+    def seed(self, seed=None):
+        return self.env.seed(seed)
 
-        # Reconstruct info dictionary for reward  computation.
-        info = {}
-        for key, value in transitions.items():
-            if key.startswith('info_'):
-                info[key.replace('info_', '')] = value
+    def reset(self):
+        return self.convert_dict_to_obs(self.env.reset())
 
-        # Re-compute reward since we may have substituted the goal.
-        reward_params = {k: transitions[k] for k in ['ag_2', 'g']}
-        reward_params['info'] = info
-        transitions['r'] = reward_fun(**reward_params)
+    def compute_reward(self, achieved_goal, desired_goal, info):
+        return self.env.compute_reward(achieved_goal, desired_goal, info)
 
-        transitions = {k: transitions[k].reshape(batch_size, *transitions[k].shape[1:])
-                       for k in transitions.keys()}
+    def render(self, mode='human'):
+        return self.env.render(mode)
 
-        assert(transitions['u'].shape[0] == batch_size_in_transitions)
-
-        return transitions
-
-    return _sample_her_transitions
+    def close(self):
+        return self.env.close()
 
 

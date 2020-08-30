@@ -4,9 +4,10 @@ import gym
 import os
 import matplotlib.pyplot as plt
 import numpy as np
-os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
+
 
 if __name__ == "__main__":
+    os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
 
     env = gym.make('FetchReach-v1')
     agent = HERDDPG(env)
