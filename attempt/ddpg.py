@@ -26,11 +26,11 @@ class DDPG:
         self.replay_buffer = PlainReplayBuffer(self.obs_dim, self.act_dim, buffer_size)
 
         # networks
-        self.policy = Actor_gen(self.obs_dim, self.act_dim, hidden_layers=(512, 200, 128), action_mult=self.act_high)
-        self.value = Critic_gen(self.obs_dim, self.act_dim, hidden_layers=(1024, 512, 300, 1))
+        self.policy = Actor_gen(self.obs_dim, self.act_dim, hidden_layers=(64, 64, 64), action_mult=self.act_high)
+        self.value = Critic_gen(self.obs_dim, self.act_dim, hidden_layers=(64, 64, 64, 1))
 
-        self.policy_target = Actor_gen(self.obs_dim, self.act_dim, hidden_layers=(512, 200, 128))
-        self.value_target = Critic_gen(self.obs_dim, self.act_dim, hidden_layers=(1024, 512, 300, 1))
+        self.policy_target = Actor_gen(self.obs_dim, self.act_dim, hidden_layers=(64, 64, 64), action_mult=self.act_high)
+        self.value_target = Critic_gen(self.obs_dim, self.act_dim, hidden_layers=(64, 64, 64, 1))
         self.policy_target.set_weights(self.policy.get_weights())
         self.value_target.set_weights(self.value.get_weights())
 
@@ -88,6 +88,7 @@ class DDPG:
             policy_gradients = tape2.gradient(policy_loss, self.policy.trainable_variables)
         self.policy_optimizer.apply_gradients(zip(policy_gradients, self.policy.trainable_variables))
 
+    def update_target_networks(self):
         # updating target network
         temp1 = np.array(self.value_target.get_weights())
         temp2 = np.array(self.value.get_weights())
@@ -100,7 +101,7 @@ class DDPG:
         temp3 = self.tau * temp2 + (1 - self.tau) * temp1
         self.policy_target.set_weights(temp3)
 
-    def drill(self, num_episodes=25):
+    def drill(self, num_episodes=50):
         num_steps = 0
         for episode in range(num_episodes):
 
@@ -124,6 +125,7 @@ class DDPG:
                 #K = np.min([n_samples, self.batch_size])
                 batch = self.replay_buffer.sample_batch(self.batch_size)
                 self._learn_on_batch(batch)
+                self.update_target_networks()
 
 
                 if is_done:
@@ -148,9 +150,9 @@ class DDPG:
 
 class HERDDPG(DDPG):
 
-    def __init__(self, env: gym.GoalEnv, goal_selection_strategy=GoalSelectionStrategy.RANDOM, buffer_size: int=int(1e5),
-                 gamma: int = 0.99, tau: int = 1e-2, start_steps: int=1000, noise_scale: float=0.1,
-                 batch_size=int(128), actor_lr=1e-3, value_lr=1e-3, seed: int=5, k=4):
+    def __init__(self, env: gym.GoalEnv, goal_selection_strategy=GoalSelectionStrategy.FUTURE, buffer_size: int=int(1e5),
+                 gamma: int = 0.99, tau: int = 0.95, start_steps: int=1000, noise_scale: float=0.1,
+                 batch_size=int(128), actor_lr=1e-3, value_lr=1e-3, seed: int=5, k=3):
 
         super().__init__(env, buffer_size, gamma, tau, start_steps, noise_scale,
                          batch_size, actor_lr, value_lr, seed)
@@ -160,42 +162,36 @@ class HERDDPG(DDPG):
         self.k = k
         self.replay_buffer = HindsightExperienceReplayWrapper(ReplayBuffer(self.buffer_size), k,
                                                               goal_selection_strategy, self.env)
-        self.ep_len = self.env.env.spec.max_episode_steps
+        self.ep_len = 50
 
-        print(f"Training HER + DDPG Agent on {self.env.env.spec.id} using \n"
+        print(f"Training HER + DDPG Agent on FetchReach-v1 using \n"
               f"{goal_selection_strategy} \n"
               f"and k = {k}")
 
-    def drill(self, epochs=10, num_episodes=50):
-        num_steps = 0
-        self.actions = []
-        for epoch in range(epochs):
-            for episode in range(num_episodes):
+    def train(self, num_batches=40):
 
-                observation, episode_reward = self.env.reset(), 0
-                for _ in range(self.ep_len):
-                    num_steps += 1
-                    if num_steps > self.start_steps:
-                        action = self.get_action(observation)
-                    else:
-                        action = self.env.action_space.sample()
+        for _ in range(num_batches):
+            if self.replay_buffer.can_sample(self.batch_size):
+                batch = self.replay_buffer.sample(self.batch_size)
+                self._learn_on_batch(batch)
 
-                    next_observation, reward, is_done, info = self.env.step(action)
-                    self.actions.append(action)
+        self.update_target_networks()
 
-                    episode_reward += reward
-                    # update buffer
-                    self.replay_buffer.add(observation, action, reward, next_observation, is_done, info)
-                    observation = next_observation
 
-                    if self.replay_buffer.can_sample(self.batch_size):
-                        batch = self.replay_buffer.sample(self.batch_size)
-                        self._learn_on_batch(batch)
+    def gather_cycle(self, num_episodes=16):
 
-                self.rewards.append(episode_reward)
-                print("Epoch " + str(epoch) + " Episode " + str(episode) + ": " + str(episode_reward) + " reward")
+        for episode in range(num_episodes):
 
-            self.test_env(3)
+            observation, episode_reward = self.env.reset(), 0
+            for _ in range(self.ep_len):
+
+                action = self.env.action_space.sample()
+
+                next_observation, reward, is_done, info = self.env.step(action)
+                episode_reward += reward
+                # update buffer
+                self.replay_buffer.add(observation, action, reward, next_observation, is_done, info)
+                observation = next_observation
 
     def test_env(self, num_episodes=1, render=False):
 
@@ -213,3 +209,19 @@ class HERDDPG(DDPG):
                 episode_length += 1
                 n_steps += 1
             print('test return:', episode_return, 'episode_length:', episode_length)
+
+    def unload(self):
+        self.gather_cycle()
+        return self.replay_buffer.sample(750)
+
+    def get_updated_policy(self, policy, value, policy_target, value_target):
+
+        self.policy.set_weights(policy)
+        self.value.set_weights(value)
+        self.policy_target.set_weights(policy_target)
+        self.value_target.set_weights(value_target)
+
+
+@ray.remote
+class RemoteHERDDPG(HERDDPG):
+    pass

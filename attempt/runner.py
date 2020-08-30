@@ -9,8 +9,8 @@ import numpy as np
 if __name__ == "__main__":
     os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
 
-    env = gym.make('FetchReach-v1')
-    agent = HERDDPG(env)
+    env = gym.make('Pendulum-v0')
+    agent = DDPG(env)
     agent.drill()
 
     plt.plot(np.vstack(agent.rewards))
