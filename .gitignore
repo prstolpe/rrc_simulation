@@ -5,3 +5,7 @@ __pycache__
 docs/_build
 
 .idea
+.tfevents
+.out.tfevents
+.v2
+logs/
