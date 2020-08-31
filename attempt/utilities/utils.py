@@ -18,7 +18,8 @@ def env_extract_dims(env: gym.Env) -> Tuple[Union[int, Tuple[int]], int]:
         # dict observation with observation field
         if isinstance(env.observation_space["observation"], gym.spaces.Box):
             if isinstance(env.observation_space.spaces, OrderedDict):
-                obs_dim = env.observation_space["observation"].shape[0] + env.observation_space['desired_goal'].shape[0]
+                obs_dim = env.observation_space["observation"].shape[0] + env.observation_space['desired_goal'].shape[0] + \
+                    env.observation_space['achieved_goal'].shape[0]
             else:
                 raise ValueError(f"Cannot extract the dimensionality from a Dict observation space "
                                                       f"where the observation is of type "

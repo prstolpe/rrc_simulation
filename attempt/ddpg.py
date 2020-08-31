@@ -74,9 +74,7 @@ class DDPG:
     def _learn_on_batch(self, batch):
 
         states, actions, rewards, next_states, done = batch
-        idx = np.concatenate((np.arange(0, 10), np.arange(13, 16)))
-        states = states[:, idx]
-        next_states = next_states[:, idx]
+
         # value optimization
         with tf.GradientTape() as tape:
             value_loss = self._value_loss(states, actions, next_states, rewards, done)
@@ -153,9 +151,9 @@ class DDPG:
 
 class HERDDPG(DDPG):
 
-    def __init__(self, env: gym.GoalEnv, goal_selection_strategy=GoalSelectionStrategy.EPISODE, buffer_size: int=int(1e5),
-                 gamma: int = 0.99, tau: int = 1e-2, start_steps: int=1000, noise_scale: float=0.1,
-                 batch_size=int(128), actor_lr=1e-3, value_lr=1e-3, seed: int=5, k=2):
+    def __init__(self, env: gym.GoalEnv, goal_selection_strategy=GoalSelectionStrategy.FUTURE, buffer_size: int=int(1e6),
+                 gamma: int = 0.98, tau: int = 0.95, start_steps: int = 1000, noise_scale: float = 0.1,
+                 batch_size=int(128), actor_lr=1e-4, value_lr=1e-3, seed: int=5, k=2):
 
         super().__init__(env, buffer_size, gamma, tau, start_steps, noise_scale,
                          batch_size, actor_lr, value_lr, seed)
@@ -163,15 +161,9 @@ class HERDDPG(DDPG):
         self.env = HERGoalEnvWrapper(env)
         self.goal_selection_strategy = goal_selection_strategy
         self.k = k
-        #self.replay_buffer = HindsightExperienceReplayWrapper(ReplayBuffer(self.buffer_size), k,
-                                                           #   goal_selection_strategy, self.env)
+        self.replay_buffer = HindsightExperienceReplayWrapper(ReplayBuffer(self.buffer_size), k,
+                                                              goal_selection_strategy, self.env)
         self.ep_len = 50
-
-        #print(f"Training HER + DDPG Agent on FetchReach-v1 using \n"
-          #    f"{goal_selection_strategy} \n"
-            #  f"and k = {k}")
-        self.replay_buffer = PlainReplayBuffer(16, self.act_dim, self.buffer_size)
-        self.her = HER()
 
     def train(self, num_batches=40):
 
@@ -188,28 +180,24 @@ class HERDDPG(DDPG):
 
             observation, episode_reward = self.env.reset(), 0
             for _ in range(self.ep_len):
-                idx = np.concatenate((np.arange(0, 10), np.arange(13, 16)))
+
                 if np.random.uniform() >= 0.2:
-                    action = self.get_action(observation[idx])
+                    action = self.get_action(observation)
                 else:
                     action = self.env.action_space.sample()
 
                 next_observation, reward, is_done, info = self.env.step(action)
                 episode_reward += reward
                 # update buffer
-                self.replay_buffer.store(observation, action, reward, next_observation, is_done)
-                self.her.keep([observation, action, reward, next_observation, is_done])
+                self.replay_buffer.add(observation, action, reward, next_observation, is_done, info)
                 observation = next_observation
-                #if self.replay_buffer.can_sample(self.batch_size):
-                batch = self.replay_buffer.sample_batch(self.batch_size)
-                self._learn_on_batch(batch)
-                self.update_target_networks()
+
+                if self.replay_buffer.can_sample(self.batch_size):
+                    batch = self.replay_buffer.sample(self.batch_size)
+                    self._learn_on_batch(batch)
+                    self.update_target_networks()
             self.rewards.append(episode_reward)
             print(episode_reward, self.policy_losses[-1], self.value_losses[-1])
-            her_list = self.her.backward()
-            for observation, action, reward, next_observation, is_done in her_list:
-                self.replay_buffer.store(observation, action, reward, next_observation, is_done)
-            self.her.reset()
 
 
     def test_env(self, num_episodes=1, render=False):
@@ -221,8 +209,6 @@ class HERDDPG(DDPG):
                 self.env.render()
             while not d:
                 # Take deterministic actions at test time (noise_scale=0)
-                idx = np.concatenate((np.arange(0, 10), np.arange(13, 16)))
-                s = s[idx]
                 s, r, d, _ = self.env.step(self.policy(s.reshape(1, -1))[0])
                 if render:
                     self.env.render()

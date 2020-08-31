@@ -12,7 +12,7 @@ if __name__ == "__main__":
 
     env = gym.make('FetchReach-v1')
     agent = HERDDPG(env)
-    for epoch in range(5):
+    for epoch in range(2):
         for cycle in tqdm(range(10)):
             agent.gather_cycle()
 
