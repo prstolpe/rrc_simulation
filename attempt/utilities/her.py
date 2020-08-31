@@ -19,12 +19,12 @@ class HER:
         num = len(self.buffer)
 
         for i in range(num):
-            goal = self.buffer[-1 - i][-2][13:16]
-            self.buffer[-1 - i][-2][10:13] = goal
-            self.buffer[-1 - i][0][10:13] = goal
+            goal = self.buffer[-1 - i][-2][10:13]
+            self.buffer[-1 - i][-2][13:16] = goal
+            self.buffer[-1 - i][0][13:16] = goal
             self.buffer[-1 - i][2] = -1.0
             self.buffer[-1 - i][4] = False
-            if np.linalg.norm(self.buffer[-1 - i][-2][13:16] - goal) < 0.05:
+            if np.linalg.norm(self.buffer[-1 - i][-2][10:13] - goal) < 0.05:
                 self.buffer[-1 - i][2] = 0.0
                 self.buffer[-1 - i][4] = True
         return self.buffer

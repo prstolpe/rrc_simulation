@@ -4,14 +4,22 @@ import gym
 import os
 import matplotlib.pyplot as plt
 import numpy as np
+from tqdm import tqdm
 
 
 if __name__ == "__main__":
     os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
 
-    env = gym.make('Pendulum-v0')
-    agent = DDPG(env)
-    agent.drill()
+    env = gym.make('FetchReach-v1')
+    agent = HERDDPG(env)
+    for epoch in range(5):
+        for cycle in tqdm(range(10)):
+            agent.gather_cycle()
+
+        # target_agent.train()
+
+        agent.test_env(10)
+    env.close()
 
     plt.plot(np.vstack(agent.rewards))
     plt.title('Rewards')

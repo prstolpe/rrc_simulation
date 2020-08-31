@@ -172,8 +172,7 @@ class HindsightExperienceReplayWrapper(object):
                 # Update the reward according to the new desired goal
                 reward = self.env.compute_reward(next_obs_dict['achieved_goal'], goal, info)
                 # Can we use achieved_goal == desired_goal?
-                if reward == 0:
-                    done = True
+                done = False
 
                 # Transform back to ndarrays
                 obs, next_obs = map(self.env.convert_dict_to_obs, (obs_dict, next_obs_dict))
