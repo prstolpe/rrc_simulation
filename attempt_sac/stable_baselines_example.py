@@ -12,6 +12,6 @@ env = gym.make('Example_CubeEnv-v0',
                visualization=False,
                )
 
-model = HER('MlpPolicy', env, SAC)
+model = HER('MlpPolicy', env, SAC, verbose=True)
 
-model.learn(int(1e4))
+model.learn(int(1e5))

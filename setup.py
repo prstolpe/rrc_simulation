@@ -6,12 +6,17 @@ d = generate_distutils_setup(
         "rrc_simulation",
         "rrc_simulation.gym_wrapper",
         "rrc_simulation.gym_wrapper.envs",
+        "rrc_simulation.tasks"
     ],
     package_dir={"": "python"},
     package_data={
         "": [
             "robot_properties_fingers/meshes/stl/*",
+            "robot_properties_fingers/meshes/stl/edu/*",
+            "robot_properties_fingers/meshes/stl/pro/*",
             "robot_properties_fingers/urdf/*",
+            "robot_properties_fingers/urdf/pro/*",
+            "robot_properties_fingers/urdf/edu/*",
         ]
     },
     scripts=[

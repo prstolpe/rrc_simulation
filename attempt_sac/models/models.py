@@ -8,8 +8,8 @@ def actor(state_shape, action_shape, units=(400, 300, 100)):
     for index in range(1, len(units)):
         x = Dense(units[index], name="L{}".format(index), activation="relu")(x)
 
-    actions_mean = Dense(action_shape[0], name="Out_mean")(x)
-    actions_std = Dense(action_shape[0], name="Out_std")(x)
+    actions_mean = Dense(action_shape, name="Out_mean")(x)
+    actions_std = Dense(action_shape, name="Out_std")(x)
 
     model = Model(inputs=state, outputs=[actions_mean, actions_std])
 

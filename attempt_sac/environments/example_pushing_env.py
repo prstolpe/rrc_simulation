@@ -13,7 +13,7 @@ class CubeEnv(cube_env.CubeEnv):
     def __init__(self,
                  initializer=None,
                  action_type=cube_env.ActionType.POSITION,
-                 frameskip=5,
+                 frameskip=1,
                  visualization=False,
                  sparse_reward = True):
 
@@ -45,9 +45,9 @@ class CubeEnv(cube_env.CubeEnv):
         """Compute the reward for the given achieved and desired goal.
 
         Args:
-            achieved_goal (dict): Current pose of the object.
-            desired_goal (dict): Goal pose of the object.
-            info (dict): An info dictionary containing a field "difficulty"
+            achieved_goal : Current pose of the object.
+            desired_goal : Goal pose of the object.
+            info : An info dictionary containing a field "difficulty"
                 which specifies the difficulty level.
 
         Returns:
@@ -62,17 +62,18 @@ class CubeEnv(cube_env.CubeEnv):
                     info,
                 )
         """
+
         if self.sparse_reward:
-            return np.float32((move_cube.evaluate_state(
-                                move_cube.Pose.from_dict(desired_goal),
-                                move_cube.Pose.from_dict(achieved_goal),
-                                info["difficulty"],
-                            ) < 0.1))
+            return - np.float32((move_cube.evaluate_state(
+                                move_cube.Pose(desired_goal[0:3], desired_goal[3:7]),
+                                move_cube.Pose(achieved_goal[0:3], achieved_goal[3:7]),
+                                1,
+                            ) > 0.01))
         else:
             return move_cube.evaluate_state(
                                 move_cube.Pose.from_dict(desired_goal),
                                 move_cube.Pose.from_dict(achieved_goal),
-                                info["difficulty"],
+                                1,
                             )
 
     def goal_observation(self, observation):
@@ -82,9 +83,9 @@ class CubeEnv(cube_env.CubeEnv):
             "observation": np.concatenate((observation['observation']['position'],
                                            observation['observation']['velocity'],
                                            observation['observation']['torque'])),
-            "desired_goal": np.concatenate((value for value in self.goal.items())),
-            "achieved_goal": np.concatenate((value for value in observation['achieved_goal'].items()))
-            },
+            "desired_goal": np.concatenate((self.goal['position'], self.goal['orientation'])),
+            "achieved_goal": np.concatenate((observation['achieved_goal']['position'], observation['achieved_goal']['orientation']))
+            }
 
         return goal_observation
 
@@ -111,7 +112,7 @@ class CubeEnv(cube_env.CubeEnv):
         """
         if self.platform is None:
             raise RuntimeError("Call `reset()` before starting to step.")
-
+        action = np.clip(action, self.action_space.low, self.action_space.high)
         if not self.action_space.contains(action):
             raise ValueError(
                 "Given action is not contained in the action space."
@@ -138,7 +139,7 @@ class CubeEnv(cube_env.CubeEnv):
             # Use observations of step t + 1 to follow what would be expected
             # in a typical gym environment.  Note that on the real robot, this
             # will not be possible
-            observation = self._create_observation(t + 1)
+            observation = self.goal_observation(self._create_observation(t + 1))
 
             reward += self.compute_reward(
                 observation["achieved_goal"],
@@ -148,7 +149,7 @@ class CubeEnv(cube_env.CubeEnv):
 
         is_done = self.step_count == move_cube.episode_length
 
-        return self.goal_observation(observation), reward, is_done, self.info
+        return observation, reward, is_done, self.info
 
     def reset(self):
         # reset simulation
