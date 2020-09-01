@@ -241,6 +241,7 @@ class ExamplePushingTrainingEnv(gym.Env):
                 width=0.065,
                 position=goal_object_pose.position,
                 orientation=goal_object_pose.orientation,
+                physicsClientId=self.platform.simfinger._pybullet_client_id,
             )
 
         self.info = {"difficulty": 1}
