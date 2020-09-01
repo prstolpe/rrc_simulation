@@ -7,7 +7,7 @@ from rrc_simulation.tasks import move_cube
 
 
 class TestMoveCube(unittest.TestCase):
-    """Test the functions of the "move cube" task module."""
+    """Test the functions of the "move cube" tasks module."""
 
     def test_get_cube_corner_positions(self):
         # cube half width

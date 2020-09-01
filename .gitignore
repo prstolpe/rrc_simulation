@@ -9,3 +9,5 @@ docs/_build
 .out.tfevents
 .v2
 logs/
+
+*.h5

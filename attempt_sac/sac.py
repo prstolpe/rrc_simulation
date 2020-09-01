@@ -1,5 +1,5 @@
 from attempt_sac.models.models import *
-from attempt_sac.utilities.utils import env_extract_dims
+
 from attempt_sac.utilities.replay_buffer import PlainReplayBuffer
 import gym
 import numpy as np
@@ -15,9 +15,11 @@ tf.keras.backend.set_floatx('float64')
 # paper https://arxiv.org/pdf/1812.05905.pdf
 # code references https://github.com/anita-hu/TF2-RL/blob/master/SAC/TF2_SAC.py#L294
                  #https://github.com/StepNeverStop/RLs, https://github.com/rail-berkeley/softlearning
+
+
 class SAC:
 
-    def __init__(self, env: gym.Env, lr_actor=3e-5, lr_critic=3e-4, actor_units=(64, 64), critic_units=(64, 64),
+    def __init__(self, env: gym.Env, lr_actor=3e-4, lr_critic=3e-3, actor_units=(64, 64), critic_units=(64, 64),
                  auto_alpha=True, alpha=0.2, tau=0.005, gamma=0.99, batch_size=128, buffer_size=100000):
 
         # env
@@ -206,9 +208,9 @@ class SAC:
                 summary_writer.flush()
 
                 done, cur_state, steps, episode_reward = False, self.env.reset(), 0, 0
-                if episode % save_freq == 0:
-                    self.save_model("sac_actor_episode{}.h5".format(episode),
-                                    "sac_critic_episode{}.h5".format(episode))
+                #if episode % save_freq == 0:
+                    #self.save_model("sac_actor_episode{}.h5".format(episode),
+                     #               "sac_critic_episode{}.h5".format(episode))
 
             if epoch > random_epochs and self.buffer_size > self.batch_size:
                 use_random = False
@@ -261,4 +263,17 @@ class SAC:
                 video.append_data(self.env.render(mode='rgb_array'))
         video.close()
         return rewards
+
+
+class HERSAC(SAC):
+
+    def __init__(self, env: gym.Env, lr_actor=3e-5, lr_critic=3e-4, actor_units=(64, 64), critic_units=(64, 64),
+                 auto_alpha=True, alpha=0.2, tau=0.005, gamma=0.99, batch_size=128, buffer_size=100000):
+
+        super().__init__(env, lr_actor=lr_actor, lr_critic=lr_critic, actor_units=actor_units,
+                         critic_units=critic_units, auto_alpha=auto_alpha, alpha=alpha, tau=tau,
+                         gamma=gamma, batch_size=batch_size, buffer_size=buffer_size)
+
+
+
 

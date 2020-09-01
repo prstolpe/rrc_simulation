@@ -29,7 +29,6 @@ import gym
 from rrc_simulation.gym_wrapper.envs import cube_env
 from rrc_simulation.tasks import move_cube
 
-
 class RandomPolicy:
     """Dummy policy which uses random actions."""
 
@@ -77,7 +76,7 @@ def main():
     policy = RandomPolicy(env.action_space)
 
     # Execute one episode.  Make sure that the number of simulation steps
-    # matches with the episode length of the task.  When using the default Gym
+    # matches with the episode length of the tasks.  When using the default Gym
     # environment, this is the case when looping until is_done == True.  Make
     # sure to adjust this in case your custom environment behaves differently!
     is_done = False

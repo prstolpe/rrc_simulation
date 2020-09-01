@@ -80,7 +80,7 @@ def main():
     )
 
     # if difficulty == 1 (i.e. pushing), we load the policy we trained for that
-    # task. otherwise, we just use the RandomPolicy as placeholder. Naturally,
+    # tasks. otherwise, we just use the RandomPolicy as placeholder. Naturally,
     # when you submit you would have a policy for each difficulty level.
     if difficulty == 1:
 
@@ -113,7 +113,7 @@ def main():
         policy = RandomPolicy(env.action_space)
 
     # Execute one episode.  Make sure that the number of simulation steps
-    # matches with the episode length of the task.  When using the default Gym
+    # matches with the episode length of the tasks.  When using the default Gym
     # environment, this is the case when looping until is_done == True.  Make
     # sure to adjust this in case your custom environment behaves differently!
     is_done = False
