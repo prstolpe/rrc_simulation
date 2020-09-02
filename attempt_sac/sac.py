@@ -2,7 +2,8 @@ from attempt_sac.models.models import *
 
 from attempt_sac.utilities.replay_buffer import PlainReplayBuffer, HindsightExperienceReplayWrapper, \
         ReplayBuffer, GoalSelectionStrategy
-from attempt_sac.utilities.her import HERGoalEnvWrapper
+
+from attempt_sac.utilities.her import HERGoalEnvWrapper, HER
 from attempt_sac.utilities.utils import env_extract_dims
 import gym
 import numpy as np
@@ -270,8 +271,8 @@ class SAC:
 
 class HERSAC(SAC):
 
-    def __init__(self, env: gym.Env, lr_actor=3e-4, lr_critic=3e-4, actor_units=(64, 64, 64), critic_units=(64, 64, 64),
-                 auto_alpha=True, alpha=0.2, tau=0.005, gamma=0.95, batch_size=128, buffer_size=int(1e6),
+    def __init__(self, env: gym.Env, lr_actor=3e-4, lr_critic=3e-4, actor_units=(256, 256,), critic_units=(256, 256),
+                 auto_alpha=True, alpha=0.2, tau=0.005, gamma=0.99, batch_size=128, buffer_size=int(1e6),
                  goal_selection_strategy=GoalSelectionStrategy.FUTURE, k = 4):
 
         super().__init__(env, lr_actor=lr_actor, lr_critic=lr_critic, actor_units=actor_units,
@@ -341,7 +342,7 @@ class HERSAC(SAC):
             # tensorboard info
             self.summaries['alpha_loss'] = alpha_loss
 
-    def train(self, max_epochs=8000, random_epochs=1000, max_steps=1000, save_freq=50):
+    def train(self, max_epochs=8000, random_epochs=1000, max_steps=1250, save_freq=50):
         current_time = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
         train_log_dir = 'logs/' + current_time
         summary_writer = tf.summary.create_file_writer(train_log_dir)
@@ -350,8 +351,8 @@ class HERSAC(SAC):
         cur_state = self.env.reset()
 
         while epoch < max_epochs:
-            if steps > max_steps:
-                done = True
+            #if steps > max_steps:
+            #    done = True
 
             if done:
                 episode += 1
@@ -369,6 +370,7 @@ class HERSAC(SAC):
                     #self.save_model("sac_actor_episode{}.h5".format(episode),
                      #               "sac_critic_episode{}.h5".format(episode))
 
+
             if epoch > random_epochs and self.buffer_size > self.batch_size:
                 use_random = False
 
@@ -377,6 +379,7 @@ class HERSAC(SAC):
             #self.env.render(mode='rgb_array')
 
             self.replay_buffer.add(cur_state, action[0], reward, next_state, done, _)  # add to memory
+
             if self.replay_buffer.can_sample(self.batch_size):
                 self.replay()  # train models through memory replay
 
@@ -406,8 +409,8 @@ class HERSAC(SAC):
 
                 summary_writer.flush()
 
-        self.save_model("sac_actor_final_episode{}.h5".format(episode),
-                        "sac_critic_final_episode{}.h5".format(episode))
+        #self.save_model("sac_actor_final_episode{}.h5".format(episode),
+          #              "sac_critic_final_episode{}.h5".format(episode))
 
 
 

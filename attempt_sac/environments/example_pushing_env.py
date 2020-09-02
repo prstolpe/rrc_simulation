@@ -13,7 +13,7 @@ class CubeEnv(cube_env.CubeEnv):
     def __init__(self,
                  initializer=None,
                  action_type=cube_env.ActionType.POSITION,
-                 frameskip=1,
+                 frameskip=50,
                  visualization=False,
                  sparse_reward = True):
 
@@ -141,7 +141,7 @@ class CubeEnv(cube_env.CubeEnv):
             # will not be possible
             observation = self.goal_observation(self._create_observation(t + 1))
 
-            reward += self.compute_reward(
+            reward = self.compute_reward(
                 observation["achieved_goal"],
                 observation["desired_goal"],
                 self.info,
