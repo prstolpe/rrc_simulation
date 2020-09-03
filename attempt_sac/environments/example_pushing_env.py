@@ -67,13 +67,13 @@ class CubeEnv(cube_env.CubeEnv):
             return - np.float32((move_cube.evaluate_state(
                                 move_cube.Pose(desired_goal[0:3], desired_goal[3:7]),
                                 move_cube.Pose(achieved_goal[0:3], achieved_goal[3:7]),
-                                1,
+                                info['difficulty'],
                             ) > 0.01))
         else:
             return move_cube.evaluate_state(
                                 move_cube.Pose.from_dict(desired_goal),
                                 move_cube.Pose.from_dict(achieved_goal),
-                                1,
+                                info['difficulty'],
                             )
 
     def goal_observation(self, observation):
